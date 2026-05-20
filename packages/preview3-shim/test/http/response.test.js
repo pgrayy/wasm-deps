@@ -1,0 +1,178 @@
+import { TextEncoder } from "node:util";
+
+import { describe, test, expect, beforeEach } from "vitest";
+
+import { Fields, HttpError, Response } from "@bytecodealliance/preview3-shim/http";
+
+import { FutureReader, future } from "@bytecodealliance/preview3-shim/future";
+import { StreamReader, stream } from "@bytecodealliance/preview3-shim/stream";
+
+const ENCODER = new TextEncoder();
+const symbolDispose = Symbol.dispose || Symbol.for("dispose");
+
+describe("Response", () => {
+  // Prepare common test variables
+  let headers;
+  let contents;
+  let trailers;
+
+  beforeEach(() => {
+    headers = new Fields();
+    headers.append("content-type", ENCODER.encode("text/plain"));
+
+    const { bodyRx } = stream();
+    contents = bodyRx;
+
+    const { rx: trailerRx } = future();
+    trailers = trailerRx;
+  });
+
+  test("should prevent direct constructor calls", () => {
+    expect(() => new Response()).toThrowError("Use Response.new(...) to create a Response");
+  });
+
+  test("new() returns Response and FutureReader", () => {
+    const [res, future] = Response.new(headers, contents, trailers);
+    expect(res).toBeInstanceOf(Response);
+    expect(future).toBeInstanceOf(FutureReader);
+    expect(res.getStatusCode()).toBe(200); // Default status code
+  });
+
+  test("new() accepts generated stream-like bodies and promise trailers", async () => {
+    const body = { read: async () => null };
+    const [res, fut] = Response.new(headers, body, Promise.resolve({ tag: "ok", val: null }));
+
+    expect(fut).toBeInstanceOf(FutureReader);
+
+    const { rx: resRx } = future();
+    const [consumedBody, consumedTrailers] = Response.consumeBody(res, resRx);
+    expect(consumedBody).toBeInstanceOf(StreamReader);
+    expect(await consumedBody.read()).toBeNull();
+    expect(await consumedTrailers.read()).toEqual({ tag: "ok", val: null });
+  });
+
+  test("dispose drops an unconsumed generated body stream", () => {
+    let disposed = false;
+    const body = {
+      read: async () => null,
+      [symbolDispose]() {
+        disposed = true;
+      },
+    };
+
+    const [res] = Response.new(headers, body, Promise.resolve({ tag: "ok", val: null }));
+    res[symbolDispose]();
+
+    expect(disposed).toBe(true);
+  });
+
+  test("new() validates arguments", () => {
+    expect(() => Response.new("invalid", contents, trailers)).toThrow(HttpError);
+    expect(() => Response.new("invalid", contents, trailers)).toThrow(
+      expect.objectContaining({ payload: { tag: "invalid-argument" } }),
+    );
+
+    expect(() => Response.new(headers, "invalid", trailers)).toThrow(HttpError);
+    expect(() => Response.new(headers, "invalid", trailers)).toThrow(
+      expect.objectContaining({ payload: { tag: "invalid-argument" } }),
+    );
+
+    expect(() => Response.new(headers, contents, "invalid")).toThrow(HttpError);
+    expect(() => Response.new(headers, contents, "invalid")).toThrow(
+      expect.objectContaining({ payload: { tag: "invalid-argument" } }),
+    );
+  });
+
+  test("contents can be null", () => {
+    const [res] = Response.new(headers, null, trailers);
+    expect(res).toBeInstanceOf(Response);
+  });
+
+  test("getStatusCode() returns the current status code", () => {
+    const [res] = Response.new(headers, contents, trailers);
+    expect(res.getStatusCode()).toBe(200); // Default
+  });
+
+  test("setStatusCode() changes the status code", () => {
+    const [res] = Response.new(headers, contents, trailers);
+    res.setStatusCode(404);
+    expect(res.getStatusCode()).toBe(404);
+
+    res.setStatusCode(500);
+    expect(res.getStatusCode()).toBe(500);
+  });
+
+  test("setStatusCode() validates the status code", () => {
+    const [res] = Response.new(headers, contents, trailers);
+
+    expect(() => res.setStatusCode("200")).toThrow(HttpError);
+    expect(() => res.setStatusCode(200.5)).toThrow(HttpError);
+    expect(() => res.setStatusCode(99)).toThrow(HttpError);
+    expect(() => res.setStatusCode(600)).toThrow(HttpError);
+  });
+
+  test("getHeaders() returns the immutable headers", () => {
+    const [res] = Response.new(headers, contents, trailers);
+    const respHeaders = res.getHeaders();
+
+    expect(respHeaders).toBe(headers);
+    expect(() => respHeaders.append("x-test", ENCODER.encode("value"))).toThrow(
+      expect.objectContaining({ payload: { tag: "immutable" } }),
+    );
+  });
+
+  test("consumeBody() returns the contents stream and trailers future", () => {
+    const [res] = Response.new(headers, contents, trailers);
+    const { rx: resRx2 } = future();
+    const [body, t] = Response.consumeBody(res, resRx2);
+
+    expect(body).toBe(contents);
+    expect(t).toBe(trailers);
+  });
+
+  test("_resolve method completes the response future", async () => {
+    const [res, future] = Response.new(headers, contents, trailers);
+
+    const futurePromise = future.read().then((result) => result);
+    res._resolve({ tag: "ok", val: null });
+
+    const result = await futurePromise;
+    expect(result).toEqual({ tag: "ok", val: null });
+
+    res._resolve({ tag: "ok", val: "should not be received" });
+  });
+});
+
+describe("Response.consumeBody single-stream semantics", () => {
+  test("throws if consumeBody() called twice without closing", async () => {
+    const headers = new Fields();
+    const { tx: bodyTx, rx: bodyRx } = stream();
+    const { tx: trailersTx, rx: trailersRx } = future();
+    const [res] = Response.new(headers, bodyRx, trailersRx);
+
+    const { rx: resRx2 } = future();
+    Response.consumeBody(res, resRx2);
+    const { rx: resRx3 } = future();
+    expect(() => Response.consumeBody(res, resRx3)).toThrowError(HttpError);
+
+    await bodyTx.close();
+    await trailersTx.write(null);
+  });
+
+  test("throws after the stream has ended", async () => {
+    const headers = new Fields();
+    const { tx: bodyTx, rx: bodyRx } = stream();
+    const { tx: trailersTx, rx: trailersRx } = future();
+    const [res] = Response.new(headers, bodyRx, trailersRx);
+
+    const { rx: resRx2 } = future();
+    const [body] = Response.consumeBody(res, resRx2);
+    await bodyTx.write(Buffer.from("x"));
+    await bodyTx.close();
+    await trailersTx.write(null);
+
+    while ((await body.read()) !== null) {}
+    const { rx: resRx3 } = future();
+    expect(() => Response.consumeBody(res, resRx3)).toThrowError(HttpError);
+  });
+});

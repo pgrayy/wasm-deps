@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'daily'
+
+  - package-ecosystem: 'npm'
+    directories:
+      - '/'
+      - '/packages/preview2-shim'
+      - '/packages/preview3-shim'
+      - '/examples/components/*'
+    groups:
+      example-dependencies:
+        update-types:
+          - major
+          - minor
+          - patch
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+      timezone: 'America/New_York'
+
+  - package-ecosystem: "cargo"
+    directories:
+      - '/crates/*'
+    schedule:
+      interval: "daily"
+      

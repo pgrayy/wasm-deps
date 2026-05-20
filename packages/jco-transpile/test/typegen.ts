@@ -1,0 +1,91 @@
+import { Buffer } from 'node:buffer';
+
+import { suite, test, assert } from 'vitest';
+
+import { JCO_WIT_FIXTURE_DIR, WIT_FIXTURE_DIR } from './helpers.js';
+
+import { generateGuestTypes, generateHostTypes } from '../src/typegen.js';
+
+suite('Type Generation', () => {
+    test('type generation (host)', async () => {
+        const files = await generateHostTypes(`${JCO_WIT_FIXTURE_DIR}/flavorful`, {
+            worldName: 'test:flavorful/flavorful',
+        });
+        assert.strictEqual(Object.keys(files).length, 2);
+        assert.strictEqual(Object.keys(files)[0], 'flavorful.d.ts');
+        assert.strictEqual(Object.keys(files)[1], 'interfaces/test-flavorful-test.d.ts');
+        assert.ok(
+            Buffer.from(files[Object.keys(files)[0]]).includes(
+                "export * as test from './interfaces/test-flavorful-test.js'",
+            ),
+        );
+        assert.ok(Buffer.from(files[Object.keys(files)[1]]).includes('export type ListInAlias = '));
+    });
+
+    test('type generation (guest)', async () => {
+        const files = await generateGuestTypes(`${JCO_WIT_FIXTURE_DIR}/flavorful`, {
+            worldName: 'test:flavorful/flavorful',
+            guest: true,
+        });
+        assert.strictEqual(Object.keys(files).length, 2);
+        assert.strictEqual(Object.keys(files)[1], 'interfaces/test-flavorful-test.d.ts');
+        assert.ok(Buffer.from(files[Object.keys(files)[0]]).includes("declare module 'test:flavorful/flavorful' {"));
+        assert.ok(Buffer.from(files[Object.keys(files)[1]]).includes("declare module 'test:flavorful/test' {"));
+    });
+
+    // https://github.com/bytecodealliance/jco/issues/624
+    test('invalid js identifiers (guest import)', async () => {
+        const files = await generateGuestTypes(`${WIT_FIXTURE_DIR}/js-reserved-word.wit`, {
+            worldName: 'fixtures:js-reserved-word/imports',
+        });
+
+        assert.strictEqual(Object.keys(files).length, 2);
+        assert.strictEqual(Object.keys(files)[1], 'interfaces/fixtures-js-reserved-word-example.d.ts');
+
+        const [worldDeclaration, interfaceDeclaration] = Object.values(files);
+        const worldDeclarationContent = Buffer.from(worldDeclaration);
+        const interfaceDeclarationContent = Buffer.from(interfaceDeclaration);
+
+        assert.ok(worldDeclarationContent.includes("declare module 'fixtures:js-reserved-word/imports' {"));
+        assert.ok(interfaceDeclarationContent.includes("declare module 'fixtures:js-reserved-word/example' {"));
+        assert(interfaceDeclarationContent.includes('export { _delete as delete };'));
+        assert(interfaceDeclarationContent.includes('function _delete'));
+    });
+
+    // https://github.com/bytecodealliance/jco/issues/624
+    test('invalid js identifiers (host import)', async () => {
+        const files = await generateHostTypes(`${WIT_FIXTURE_DIR}/js-reserved-word.wit`, {
+            worldName: 'fixtures:js-reserved-word/imports',
+        });
+
+        assert.strictEqual(Object.keys(files).length, 2);
+        assert.strictEqual(Object.keys(files)[1], 'interfaces/fixtures-js-reserved-word-example.d.ts');
+
+        const [worldDeclaration, interfaceDeclaration] = Object.values(files);
+        const worldDeclarationContent = Buffer.from(worldDeclaration);
+        const interfaceDeclarationContent = Buffer.from(interfaceDeclaration);
+
+        assert(worldDeclarationContent.includes('export type * as FixturesJsReservedWordExample'));
+        assert(interfaceDeclarationContent.includes('@module Interface fixtures:js-reserved-word/example'));
+
+        assert(interfaceDeclarationContent.includes('export { _delete as delete };'));
+        assert(interfaceDeclarationContent.includes('function _delete'));
+    });
+
+    // https://github.com/bytecodealliance/jco/issues/627
+    test('bare exports with ancillary types', async () => {
+        const files = await generateHostTypes(`${WIT_FIXTURE_DIR}/bare-export-with-result.wit`, {
+            worldName: 'fixtures:bare-export-with-result/component',
+            guest: true,
+        });
+
+        assert.strictEqual(Object.keys(files).length, 1);
+        assert.strictEqual(Object.keys(files)[0], 'component.d.ts');
+
+        const [worldDeclaration] = Object.values(files);
+        const worldDeclarationContent = new TextDecoder().decode(worldDeclaration);
+
+        assert.include(worldDeclarationContent, 'export type Result<T, E>');
+        assert.include(worldDeclarationContent, 'declare module');
+    });
+});

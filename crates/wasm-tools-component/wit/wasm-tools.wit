@@ -1,0 +1,120 @@
+package local:wasm-tools;
+
+interface tools {
+  /// Translate the WebAssembly text format to binary
+  parse: func(wat: string) -> result<list<u8>, string>;
+
+  /// Translate the WebAssembly binary format to text
+  print: func(binary: list<u8>) -> result<string, string>;
+
+  enum string-encoding {
+    utf8,
+    utf16,
+    compact-utf16
+  }
+
+  /// Create a component from a core wasm binary that implements and embeds a component type
+  component-new: func(binary: list<u8>, adapters: option<list<tuple<string, list<u8>>>>) -> result<list<u8>, string>;
+
+  /// Extract a *.wit interface from a component, optionally providing a document name to extract
+  component-wit: func(binary: list<u8>) -> result<string, string>;
+
+  /// Simple representation of semantic versions
+  // see: https://docs.rs/semver/1.0.28/semver/struct.Version.html
+  record semver-version {
+     major: u64,
+     minor: u64,
+     patch: u64,
+     pre: option<string>,
+     build: option<string>,
+  }
+
+  /// Metadata that can be returned related to an interface
+  record interface-metadata {
+      namespace: string,
+      %package: string,
+      %interface: string,
+      version: option<semver-version>,
+  }
+
+  /// Information about a given WIT interface
+  record wit-metadata {
+      imports: list<interface-metadata>,
+      exports: list<interface-metadata>,
+  }
+
+  /// Way to specify WIT
+  variant wit-specifier {
+      /// WIT raw source
+      source(string),
+      /// Path to wit file or directory
+      path(string),
+  }
+
+  /// Extract metadata from a WIT interface for a component for a given world
+  ///
+  /// If no world is specified, the root world is used
+  component-wit-metadata-for-world: func(
+    wit: wit-specifier,
+    world-name: option<string>
+  ) -> result<wit-metadata, string>;
+
+  type producers-fields = list<tuple<string, list<tuple<string, string>>>>;
+
+  /// Enumerate enabled features
+  variant enabled-feature-set {
+    /// Enable only the given list of features
+    %list(list<string>),
+    /// Enable all features
+    all,
+  }
+
+  /// Embed a WIT type into a component.
+  /// Only a singular WIT document without use resolutions is supported for this API.
+  record embed-opts {
+    binary: option<list<u8>>,
+
+    /// Pass an inline WIT source
+    wit-source: option<string>,
+
+    /// Pass the file system path to WIT file
+    wit-path: option<string>,
+
+    string-encoding: option<string-encoding>,
+
+    dummy: option<bool>,
+
+    %world: option<string>,
+
+    metadata: option<producers-fields>,
+
+    /// Features that should be enabled as part of feature gating
+    features: option<enabled-feature-set>,
+  }
+
+  component-embed: func(embed-opts: embed-opts) -> result<list<u8>, string>;
+
+  variant module-meta-type {
+    module,
+    // the number of nested modules
+    component(u32),
+  }
+
+  record module-metadata {
+    parent-index: option<u32>,
+    name: option<string>,
+    meta-type: module-meta-type,
+    range: tuple<u32, u32>,
+    producers: producers-fields,
+  }
+
+  /// Extract the metadata for a component
+  metadata-show: func(binary: list<u8>) -> result<list<module-metadata>, string>;
+
+  /// Append producer metadata to a component
+  metadata-add: func(binary: list<u8>, metadata: producers-fields) -> result<list<u8>, string>;
+}
+
+world wasm-tools {
+  export tools;
+}

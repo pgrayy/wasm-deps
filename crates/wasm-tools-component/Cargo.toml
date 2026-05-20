@@ -1,0 +1,21 @@
+[package]
+name = "wasm-tools-js"
+publish = false
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+anyhow = { workspace = true }
+wasm-encoder = { workspace = true }
+wasm-metadata = { workspace = true, features = [ "oci" ] }
+wasmparser = { workspace = true }
+wasmprinter = { workspace = true, features = ["component-model"] }
+wat = { workspace = true }
+wit-bindgen = { workspace = true, features = ["macros"] }
+wit-component = { workspace = true }
+wit-parser = { workspace = true }
