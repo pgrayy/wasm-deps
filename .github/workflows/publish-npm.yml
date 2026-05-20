@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 20
           registry-url: https://npm.pkg.github.com
-          scope: "@strands-agents"
+          scope: "@pgrayy"
 
       - name: Build
         working-directory: componentize-js
@@ -43,7 +43,7 @@ jobs:
         with:
           node-version: 20
           registry-url: https://npm.pkg.github.com
-          scope: "@strands-agents"
+          scope: "@pgrayy"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
