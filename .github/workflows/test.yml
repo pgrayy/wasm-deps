@@ -19,7 +19,7 @@ jobs:
 
       - name: Build componentize-js
         working-directory: componentize-js
-        run: npm ci && npm run build
+        run: npm install && npm run build
 
       - name: Clone sdk-typescript
         run: git clone --depth=1 https://github.com/strands-agents/sdk-typescript.git /tmp/sdk-ts

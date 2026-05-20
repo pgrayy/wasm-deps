@@ -22,7 +22,7 @@ jobs:
 
       - name: Build
         working-directory: componentize-js
-        run: npm ci && npm run build
+        run: npm install && npm run build
 
       - name: Publish to GitHub Packages
         working-directory: componentize-js
@@ -30,30 +30,26 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-jco:
-    name: Publish jco
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: https://npm.pkg.github.com
-          scope: "@pgrayy"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build
-        working-directory: jco
-        run: npm install && npm run build:release
-
-      - name: Publish to GitHub Packages
-        working-directory: jco/packages/jco
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # publish-jco:
+  #   name: Publish jco
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #     packages: write
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #         registry-url: https://npm.pkg.github.com
+  #         scope: "@pgrayy"
+  #     - name: Install Rust
+  #       uses: dtolnay/rust-toolchain@stable
+  #     - name: Build
+  #       working-directory: jco
+  #       run: npm install && npm run build:release
+  #     - name: Publish to GitHub Packages
+  #       working-directory: jco/packages/jco
+  #       run: npm publish --access public
+  #       env:
+  #         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
