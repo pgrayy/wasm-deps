@@ -1,0 +1,495 @@
+package jco:test-components;
+
+interface local-run-async {
+    run: async func();
+}
+
+interface local-run-string {
+    run: func() -> string;
+}
+
+interface get-string {
+    get-string: func() -> string;
+}
+
+interface async-add-s32 {
+    add: async func(a: s32, b: s32) -> result<s32, string>;
+}
+
+interface async-lower-result-pointer-host {
+    add-five: async func(a: u32, b: u32, c: u32, d: u32, e: u32) -> result<u32, string>;
+}
+
+interface sync-lower-result-pointer-host {
+    add-pair: func(a: u32, b: u32, c: u32, d: u32, e: u32) -> tuple<u32, u32>;
+}
+
+interface resources {
+    resource example-resource {
+        constructor(id: u32);
+        get-id: func() -> u32;
+    }
+}
+
+interface example-types {
+    variant example-variant {
+        num(u32),
+        str(string),
+        float(f32),
+        maybe-u32(option<u32>),
+    }
+
+    variant layout-variant {
+        empty,
+        name(string),
+    }
+
+    enum example-enum {
+        first,
+        second,
+        third,
+    }
+
+    record example-record {
+        id: u32,
+        id-str: string,
+    }
+
+    record variant-string-record {
+        kind: layout-variant,
+        name: string,
+    }
+
+    record padded-record {
+        id: u32,
+        byte: u8,
+    }
+
+    flags example-flags {
+        first,
+        second,
+        third,
+    }
+}
+
+interface get-stream-async {
+    use resources.{example-resource};
+    use example-types.{
+        example-variant,
+        example-enum,
+        example-record,
+        example-flags,
+        layout-variant,
+        variant-string-record,
+        padded-record,
+    };
+
+    resource example-guest-resource {
+        constructor(id: u32);
+        get-id: func() -> u32;
+        get-id-async: async func() -> u32;
+    }
+
+    get-stream-bool: async func(vals: list<bool>) -> stream<bool>;
+
+    get-stream-u32: async func(vals: list<u32>) -> stream<u32>;
+    get-stream-s32: async func(vals: list<s32>) -> stream<s32>;
+
+    get-stream-u8: async func(vals: list<u8>) -> stream<u8>;
+    get-stream-s8: async func(vals: list<s8>) -> stream<s8>;
+
+    get-stream-u16: async func(vals: list<u16>) -> stream<u16>;
+    get-stream-s16: async func(vals: list<s16>) -> stream<s16>;
+
+    get-stream-u64: async func(vals: list<u64>) -> stream<u64>;
+    get-stream-s64: async func(vals: list<s64>) -> stream<s64>;
+
+    get-stream-f32: async func(vals: list<f32>) -> stream<f32>;
+
+    get-stream-f64: async func(vals: list<f64>) -> stream<f64>;
+
+    // NOTE: stream<char> is not yet supported upstream (stream<u8> can be used instead)
+    //
+    // get-stream-char: async func(vals: list<char>) -> result<stream<char>, string>;
+
+    get-stream-string: async func(vals: list<string>) -> stream<string>;
+
+    get-stream-record: async func(vals: list<example-record>) -> stream<example-record>;
+
+    get-stream-variant: async func(vals: list<example-variant>) -> stream<example-variant>;
+    get-stream-layout-variant: async func(vals: list<layout-variant>) -> stream<layout-variant>;
+    get-stream-variant-string-record: async func(vals: list<variant-string-record>) -> stream<variant-string-record>;
+    get-stream-list-padded-record: async func(vals: list<list<padded-record>>) -> stream<list<padded-record>>;
+
+    get-stream-list-u8: async func(vals: list<list<u8>>) -> stream<list<u8>>;
+    get-stream-list-string: async func(vals: list<list<string>>) -> stream<list<string>>;
+    get-stream-list-record: async func(vals: list<list<example-record>>) -> stream<list<example-record>>;
+    get-stream-fixed-list-u32: async func(vals: list<list<u32, 5>>) -> stream<list<u32, 5>>;
+
+    get-stream-tuple: async func(vals: list<tuple<u32, s32, string>>) -> stream<tuple<u32, s32, string>>;
+    get-stream-tight-tuple: async func(vals: list<tuple<u8, u8, u32>>) -> stream<tuple<u8, u8, u32>>;
+
+    get-stream-flags: async func(vals: list<example-flags>) -> stream<example-flags>;
+
+    get-stream-enum: async func(vals: list<example-enum>) -> stream<example-enum>;
+
+    get-stream-option-string: async func(vals: list<option<string>>) -> stream<option<string>>;
+
+    get-stream-result-string: async func(vals: list<result<string, string>>) -> stream<result<string, string>>;
+
+    // NOTE: stream<borrow<t>> is not supoprted
+    //
+    // get-stream-example-resource-borrow: async func(
+    //   vals: list<borrow<example-resource>>
+    // ) -> result<stream<borrow<example-resource>>, string>;
+
+    get-stream-example-resource-own: async func(vals: list<u32>) -> stream<example-guest-resource>;
+    get-example-resource-own-disposes: func() -> u32;
+
+    get-stream-example-resource-own-attr: async func(vals: list<example-resource>) -> stream<u32>;
+
+    get-stream-stream-string: async func(vals: list<string>) -> stream<stream<string>>;
+
+    // The unspooled version should take advantage of host->host optimizations
+    get-stream-future-string: async func(vals: list<future<string>>) -> stream<future<string>>;
+}
+
+interface get-future-async {
+    use resources.{example-resource};
+    use example-types.{example-variant, example-enum, example-record, example-flags};
+
+    resource example-guest-resource {
+        constructor(id: u32);
+        get-id: func() -> u32;
+        get-id-async: async func() -> u32;
+    }
+
+    get-future-bool: async func(vals: bool) -> future<bool>;
+
+    get-future-u32: async func(vals: u32) -> future<u32>;
+    get-future-s32: async func(vals: s32) -> future<s32>;
+
+    get-future-u8: async func(vals: u8) -> future<u8>;
+    get-future-s8: async func(vals: s8) -> future<s8>;
+
+    get-future-u16: async func(vals: u16) -> future<u16>;
+    get-future-s16: async func(vals: s16) -> future<s16>;
+
+    get-future-u64: async func(vals: u64) -> future<u64>;
+    get-future-s64: async func(vals: s64) -> future<s64>;
+
+    get-future-f32: async func(vals: f32) -> future<f32>;
+
+    get-future-f64: async func(vals: f64) -> future<f64>;
+
+    // NOTE: future<char> is not yet supported upfuture (future<u8> can be used instead)
+    //
+    // get-future-char: async func(vals: list<char>) -> result<future<char>, string>;
+
+    get-future-string: async func(vals: string) -> future<string>;
+
+    get-future-record: async func(vals: example-record) -> future<example-record>;
+
+    get-future-variant: async func(vals: example-variant) -> future<example-variant>;
+
+    get-future-list-u8: async func(vals: list<u8>) -> future<list<u8>>;
+    get-future-list-string: async func(vals: list<string>) -> future<list<string>>;
+    get-future-list-record: async func(vals: list<example-record>) -> future<list<example-record>>;
+    get-future-fixed-list-u32: async func(vals: list<u32, 5>) -> future<list<u32, 5>>;
+
+    get-future-tuple: async func(vals: tuple<u32, s32, string>) -> future<tuple<u32, s32, string>>;
+
+    get-future-flags: async func(vals: example-flags) -> future<example-flags>;
+
+    get-future-enum: async func(vals: example-enum) -> future<example-enum>;
+
+    get-future-option-string: async func(vals: option<string>) -> future<option<string>>;
+
+    get-future-result-string: async func(vals: result<string, string>) -> future<result<string, string>>;
+
+    // NOTE: future<borrow<t>> is not supoprted
+    //
+    // get-future-example-resource-borrow: async func(
+    //   vals: list<borrow<example-resource>>
+    // ) -> result<future<borrow<example-resource>>, string>;
+
+    get-future-example-resource-own: async func(vals: u32) -> future<example-guest-resource>;
+    get-example-resource-own-disposes: func() -> u32;
+
+    get-future-example-resource-own-attr: async func(vals: example-resource) -> future<u32>;
+
+    get-future-future-string: async func(vals: string) -> future<future<string>>;
+
+    // The unspooled version should take advantage of host->host optimizations
+    get-future-stream-string: async func(vals: stream<string>) -> future<stream<string>>;
+
+    // The spooled version returns a *new* stream that forces transit through the component
+    get-future-stream-string-spool: async func(vals: list<string>) -> future<stream<string>>;
+}
+
+world async-simple-import {
+  import load-u32: async func() -> u32;
+  import load-string: async func() -> string;
+
+  export get-u32: async func() -> u32;
+  export get-string: async func() -> string;
+}
+
+world async-error-context {
+  export local-run-async;
+}
+
+world async-flat-param-adder {
+  export async-add-s32;
+}
+
+world async-lower-result-pointer {
+  import async-lower-result-pointer-host;
+  import sync-lower-result-pointer-host;
+  export local-run-async;
+}
+
+world async-simple-return {
+  use example-types.{layout-variant};
+
+  export get-u32: async func() -> u32;
+  export get-string: async func() -> string;
+  export get-layout-variant-and-u32: async func() -> tuple<layout-variant, u32>;
+}
+
+world stream-tx {
+  import resources;
+  export get-stream-async;
+}
+
+world future-tx {
+  import resources;
+  export get-future-async;
+}
+
+interface return-imported-resource-fns {
+  use resources.{example-resource};
+  get-resource: async func(id: u32) -> example-resource;
+  get-resource-result: async func(id: u32) -> result<example-resource, string>;
+}
+
+world async-return-imported-resource {
+  import resources;
+  export return-imported-resource-fns;
+}
+
+interface sleep-post-return {
+  run: async func(sleep-time-millis: u64);
+}
+
+interface sleep {
+  sleep-millis: async func(time-in-millis: u64);
+}
+
+world sleep-post-return-caller {
+  import sleep;
+  import sleep-post-return;
+  export sleep-post-return;
+}
+
+world sleep-post-return-callee {
+  import sleep;
+  export sleep-post-return;
+}
+
+interface future-concurrency-host {
+  write-via-stream: func(s: stream<u8>) -> future<u32>;
+}
+
+world future-concurrency {
+  import future-concurrency-host;
+  export local-run-async;
+}
+
+interface stream-concurrency-host {
+  signal: func();
+}
+
+interface stream-concurrency-test {
+  read-after-signal: async func(s: stream<u8>) -> list<u8>;
+}
+
+world stream-concurrency {
+  import stream-concurrency-host;
+  export stream-concurrency-test;
+}
+
+interface fixed-length-lists-fn {
+  takes-returns-fixed: func(bools: list<bool, 17>) -> result<list<u8, 32>, string>;
+}
+
+world fixed-length-lists {
+  export fixed-length-lists-fn;
+}
+
+world basic-run-string {
+    import get-string;
+    export get-string;
+    export local-run-string;
+}
+
+//////////////////////
+// Stream lowerings //
+//////////////////////
+
+interface stream-lower-sync {
+    // TODO(fix): optimize host-only stream usage -- detect when the read & write are held by the host
+    stream-passthrough: func(s: stream<u32>) -> stream<u32>;
+}
+
+interface stream-lower-async {
+    use resources.{example-resource};
+    use example-types.{
+        example-variant,
+        example-enum,
+        example-record,
+        example-flags,
+        layout-variant,
+        variant-string-record,
+        padded-record,
+    };
+
+    stream-passthrough: async func(s: stream<u32>) -> stream<u32>;
+
+    read-stream-values-bool: async func(s: stream<bool>) -> list<bool>;
+
+    read-stream-values-u8: async func(s: stream<u8>) -> list<u8>;
+    read-stream-values-s8: async func(s: stream<s8>) -> list<s8>;
+
+    read-stream-values-u16: async func(s: stream<u16>) -> list<u16>;
+    read-stream-values-s16: async func(s: stream<s16>) -> list<s16>;
+
+    read-stream-values-u32: async func(s: stream<u32>) -> list<u32>;
+    read-stream-values-s32: async func(s: stream<s32>) -> list<s32>;
+
+    read-stream-values-u64: async func(s: stream<u64>) -> list<u64>;
+    read-stream-values-s64: async func(s: stream<s64>) -> list<s64>;
+
+    read-stream-values-f32: async func(s: stream<f32>) -> list<f32>;
+
+    read-stream-values-f64: async func(s: stream<f64>) -> list<f64>;
+
+    read-stream-values-string: async func(s: stream<string>) -> list<string>;
+
+    read-stream-values-record: async func(s: stream<example-record>) -> list<example-record>;
+
+    read-stream-values-variant: async func(s: stream<example-variant>) -> list<example-variant>;
+    read-stream-values-layout-variant: async func(s: stream<layout-variant>) -> list<layout-variant>;
+    read-stream-values-variant-string-record: async func(s: stream<variant-string-record>) -> list<variant-string-record>;
+
+    read-stream-values-tuple: async func(s: stream<tuple<u32, s32, string>>) -> list<tuple<u32, s32, string>>;
+    read-stream-values-tight-tuple: async func(s: stream<tuple<u8, u8, u32>>) -> list<tuple<u8, u8, u32>>;
+
+    read-stream-values-flags: async func(s: stream<example-flags>) -> list<example-flags>;
+
+    read-stream-values-enum: async func(s: stream<example-enum>) -> list<example-enum>;
+
+    read-stream-values-option-string: async func(s: stream<option<string>>) -> list<option<string>>;
+
+    read-stream-values-result-string: async func(s: stream<result<string, string>>) -> list<result<string, string>>;
+
+    read-stream-values-list-u8: async func(s: stream<list<u8>>) -> list<list<u8>>;
+    read-stream-values-list-string: async func(s: stream<list<string>>) -> list<list<string>>;
+    read-stream-values-fixed-list-u32: async func(s: stream<list<list<u32, 5>>>) -> list<list<list<u32, 5>>>;
+    read-stream-values-list-record: async func(s: stream<list<example-record>>) -> list<list<example-record>>;
+    read-stream-values-list-padded-record: async func(s: stream<list<padded-record>>) -> list<list<padded-record>>;
+
+    read-stream-values-example-resource-own: async func(s: stream<example-resource>);
+
+    read-stream-values-example-resource-own-attr: async func(s: stream<example-resource>) -> list<u32>;
+
+    read-stream-values-stream-string: async func(s: stream<stream<string>>) -> list<list<string>>;
+
+    read-stream-values-future-string: async func(vals: stream<future<string>>) -> list<string>;
+}
+
+world stream-lower {
+    import resources;
+
+    export stream-lower-sync;
+    export stream-lower-async;
+}
+
+//////////////////////
+// Future lowerings //
+//////////////////////
+
+interface future-lower-sync {
+    // TODO(fix): optimize host-only stream usage -- detect when the read & write are held by the host
+    future-passthrough: func(s: future<u32>) -> future<u32>;
+}
+
+interface future-lower-async {
+    use resources.{example-resource};
+    use example-types.{example-variant, example-enum, example-record, example-flags};
+
+    future-passthrough: async func(s: future<u32>) -> future<u32>;
+
+    read-future-value-bool: async func(f: future<bool>) -> bool;
+
+    read-future-value-u32: async func(f: future<u32>) -> u32;
+    read-future-value-s32: async func(f: future<s32>) -> s32;
+
+    read-future-value-u8: async func(f: future<u8>) -> u8;
+    read-future-value-s8: async func(f: future<s8>) -> s8;
+
+    read-future-value-u16: async func(f: future<u16>) -> u16;
+    read-future-value-s16: async func(f: future<s16>) -> s16;
+
+    read-future-value-u64: async func(f: future<u64>) -> u64;
+    read-future-value-s64: async func(f: future<s64>) -> s64;
+
+    read-future-value-f32: async func(f: future<f32>) -> f32;
+
+    read-future-value-f64: async func(f: future<f64>) -> f64;
+
+    // NOTE: future<char> is not yet supported upfuture (future<u8> can be used instead)
+    //
+    // get-future-char: async func(vals: list<char>) -> result<future<char>, string>;
+
+    read-future-value-string: async func(f: future<string>) -> string;
+
+    read-future-value-record: async func(f: future<example-record>) -> example-record;
+
+    read-future-value-variant: async func(f: future<example-variant>) -> example-variant;
+
+    read-future-value-list-u8: async func(f: future<list<u8>>) -> list<u8>;
+    read-future-value-list-string: async func(f: future<list<string>>) -> list<string>;
+    read-future-value-list-record: async func(f: future<list<example-record>>) -> list<example-record>;
+    read-future-value-fixed-list-u32: async func(f: future<list<u32, 5>>) -> list<u32, 5>;
+
+    read-future-value-tuple: async func(f: future<tuple<u32, s32, string>>) -> tuple<u32, s32, string>;
+
+    read-future-value-flags: async func(f: future<example-flags>) -> example-flags;
+
+    read-future-value-enum: async func(f: future<example-enum>) -> example-enum;
+
+    read-future-value-option-string: async func(f: future<option<string>>) -> option<string>;
+
+    read-future-value-result-string: async func(f: future<result<string, string>>) -> result<string, string>;
+
+    // NOTE: future<borrow<t>> is not supoprted
+    //
+    // get-future-example-resource-borrow: async func(
+    //   vals: list<borrow<example-resource>>
+    // ) -> result<future<borrow<example-resource>>, string>;
+
+    read-future-value-example-resource-own: async func(s: future<example-resource>);
+
+    read-future-value-example-resource-own-attr: async func(s: future<example-resource>) -> u32;
+
+    read-future-value-future-string: async func(f: future<future<string>>) -> string;
+
+    read-future-value-stream-string: async func(vals: future<stream<string>>) -> list<string>;
+}
+
+world future-lower {
+    import resources;
+    export future-lower-sync;
+    export future-lower-async;
+}
