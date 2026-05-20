@@ -1,4 +1,4 @@
-name: Publish wasmtime-py to PyPI
+name: Publish wasmtime-py wheels
 
 on:
   release:
@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-wheels:
-    name: Build wheels
+    name: Build macOS wheels
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,73 +20,19 @@ jobs:
       - name: Install build tools
         run: pip install build
 
-      - name: Build sdist
-        working-directory: wasmtime-py
-        run: |
-          git clean -fdx wasmtime build
-          python -m build --sdist
-
-      - name: Build wheels (manylinux x86_64)
-        working-directory: wasmtime-py
-        run: |
-          git clean -fdx wasmtime build
-          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=manylinux1-x86_64
-
-      - name: Build wheels (manylinux aarch64)
-        working-directory: wasmtime-py
-        run: |
-          git clean -fdx wasmtime build
-          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=manylinux2014_aarch64
-
-      - name: Build wheels (macOS x86_64)
+      - name: Build wheel (macOS x86_64)
         working-directory: wasmtime-py
         run: |
           git clean -fdx wasmtime build
           python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-10-13-x86_64
 
-      - name: Build wheels (macOS arm64)
+      - name: Build wheel (macOS arm64)
         working-directory: wasmtime-py
         run: |
           git clean -fdx wasmtime build
           python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
 
-      - name: Build wheels (Windows amd64)
-        working-directory: wasmtime-py
-        run: |
-          git clean -fdx wasmtime build
-          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=win-amd64
-
-      - name: Build wheels (musllinux x86_64)
-        working-directory: wasmtime-py
-        run: |
-          git clean -fdx wasmtime build
-          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=musllinux_1_2_x86_64
-
-      - name: Build wheels (musllinux aarch64)
-        working-directory: wasmtime-py
-        run: |
-          git clean -fdx wasmtime build
-          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=musllinux_1_2_aarch64
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload wheels to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: dists
-          path: wasmtime-py/dist
-
-  publish:
-    name: Publish to PyPI
-    needs: build-wheels
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dists
-          path: dist
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_TOKEN }}
+          files: wasmtime-py/dist/*.whl
