@@ -38,3 +38,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: wasmtime-py/dist/*.whl
+          tag_name: ${{ github.event.release.tag_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
