@@ -1,5 +1,5 @@
 {
-    "name": "@bytecodealliance/jco",
+    "name": "@pgrayy/jco",
     "version": "1.19.0",
     "description": "JavaScript tooling for working with WebAssembly Components",
     "keywords": [
