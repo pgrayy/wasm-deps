@@ -1,0 +1,12 @@
+package local:strings;
+
+interface strings {
+  a: func(x: string);
+  b: func() -> string;
+  c: func(a: string, b: string) -> string;
+}
+
+world the-world {
+  import strings;
+  export strings;
+}
