@@ -1,7 +1,6 @@
 [build-system]
 requires = [
     "setuptools",
-    "setuptools-git-versioning>=2.0,<3",
 ]
 # Use an in-tree build backend, to customise the wheels we generate
 build-backend = "backend"
@@ -11,9 +10,7 @@ backend-path = [
 
 [project]
 name = "pgrayy-wasmtime"
-dynamic = [
-    "version",
-]
+version = "44.0.2"
 description = "A WebAssembly runtime powered by Wasmtime"
 license = "Apache-2.0 WITH LLVM-exception"
 readme = "README.md"
@@ -73,7 +70,3 @@ include = [
     "py.typed",
 ]
 
-[tool.setuptools-git-versioning]
-# https://setuptools-git-versioning.readthedocs.io/en/stable/options/index.html
-enabled = false
-version_file = "VERSION"
