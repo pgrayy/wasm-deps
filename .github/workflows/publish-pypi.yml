@@ -26,9 +26,6 @@ jobs:
       - name: Install build tools
         run: pip install build pycparser
 
-      - name: Set version from release tag
-        run: echo "${{ github.event.release.tag_name }}" | sed 's/^v//' > wasmtime-py/VERSION
-
       - name: Build wasmtime from source
         working-directory: wasmtime
         run: cargo build --release -p wasmtime-c-api
