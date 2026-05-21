@@ -39,6 +39,10 @@ jobs:
           cp wasmtime/target/release/libwasmtime.dylib wasmtime-py/wasmtime/darwin-aarch64/_libwasmtime.dylib
           rm -rf wasmtime-py/wasmtime/include
           cp -r wasmtime/crates/c-api/include wasmtime-py/wasmtime/include
+          # Generate conf.h from conf.h.in (enable all features used by our build)
+          sed -e 's/#cmakedefine \(WASMTIME_FEATURE_.*\)/#define \1/' \
+            wasmtime/crates/c-api/include/wasmtime/conf.h.in \
+            > wasmtime-py/wasmtime/include/wasmtime/conf.h
 
       - name: Generate Python bindings from headers
         working-directory: wasmtime-py
