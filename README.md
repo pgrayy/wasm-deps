@@ -18,12 +18,40 @@ git subtree pull --prefix=wasmtime https://github.com/bytecodealliance/wasmtime.
 git subtree pull --prefix=wasmtime-py https://github.com/bytecodealliance/wasmtime-py.git main --squash
 ```
 
-## Publishing
+## Releasing
 
-On GitHub Release, CI builds macOS wheels for wasmtime-py and attaches them as release assets.
+Releases are triggered by publishing a GitHub Release. The release workflow builds a macOS arm64 C API tarball and a wasmtime-py wheel, attaches them to the release, and publishes the wheel to PyPI.
 
-Install from a release:
+### Steps
+
+1. Check the wasmtime version in the subtree:
+   ```bash
+   grep '^version' wasmtime/Cargo.toml
+   ```
+
+2. Update `wasmtime-py/VERSION` to match:
+   ```bash
+   echo "46.0.0" > wasmtime-py/VERSION
+   ```
+
+3. Update `WASMTIME_VERSION` in `wasmtime-py/ci/download-wasmtime.py` to the tag you're about to create (e.g., `v46.0.0`).
+
+4. Commit and push to main:
+   ```bash
+   git add wasmtime-py/VERSION wasmtime-py/ci/download-wasmtime.py
+   git commit -m "chore: bump versions to v46.0.0"
+   git push
+   ```
+
+5. Create the release:
+   ```bash
+   gh release create v46.0.0 --title "v46.0.0" --notes "Wasmtime 46.0.0" --target main
+   ```
+
+6. Wait for the release workflow to complete. It will attach the tarball and wheel to the release and publish to PyPI.
+
+### Install from a release
 
 ```bash
-pip install https://github.com/pgrayy/wasm-deps/releases/download/v0.1.0/wasmtime-44.0.0-py3-none-macosx_11_0_arm64.whl
+pip install https://github.com/pgrayy/wasm-deps/releases/download/v46.0.0/pgrayy_wasmtime-46.0.0-py3-none-macosx_11_0_arm64.whl
 ```
