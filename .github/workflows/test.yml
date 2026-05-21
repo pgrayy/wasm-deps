@@ -10,6 +10,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint-wasmtime:
+    name: Lint wasmtime (fmt + clippy)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-wasip2
+      - run: cargo fmt --all -- --check
+        working-directory: wasmtime
+      - run: cargo clippy --workspace --all-targets -p wasmtime-c-api
+        working-directory: wasmtime
+
   build-wasmtime:
     name: Build wasmtime C API
     runs-on: macos-latest
@@ -34,7 +48,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip2
+          targets: wasm32-wasip1,wasm32-wasip2
       - name: Install Ninja
         run: brew install ninja
       - name: Build and run C API tests
@@ -57,5 +71,9 @@ jobs:
         working-directory: wasmtime-py
     steps:
       - uses: actions/checkout@v4
-      - uses: ./wasmtime-py/.github/actions/setup
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - uses: astral-sh/setup-uv@v7
+      - run: uv run ci/download-wasmtime.py
       - run: uv run --all-extras pytest
