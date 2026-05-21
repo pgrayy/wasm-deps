@@ -19,7 +19,7 @@ use crate::masm::{
 };
 use crate::reg::{Reg, writable};
 use crate::stack::{TypedReg, Val};
-use crate::{Result, bail, ensure, format_err};
+use crate::{Result, bail, format_err};
 use regalloc2::RegClass;
 use smallvec::{SmallVec, smallvec};
 use wasmparser::{
@@ -28,8 +28,8 @@ use wasmparser::{
 };
 use wasmtime_cranelift::TRAP_INDIRECT_CALL_TO_NULL;
 use wasmtime_environ::{
-    DataIndex, FUNCREF_INIT_BIT, FuncIndex, GlobalIndex, IndexType, MemoryIndex, TableIndex,
-    TypeIndex, WasmHeapType, WasmValType,
+    DataIndex, FuncIndex, GlobalIndex, MemoryIndex, TableIndex, TypeIndex, WasmHeapType,
+    WasmValType,
 };
 
 /// A macro to define unsupported WebAssembly operators.
@@ -1684,7 +1684,7 @@ where
     }
 
     fn visit_call_indirect(&mut self, type_index: u32, table_index: u32) -> Self::Output {
-        // Spill now because `emit_lazy_init_funcref` and the `FnCall::emit`
+        // Spill now because `emit_table_get` and the `FnCall::emit`
         // invocations will both trigger spills since they both call functions.
         // However, the machine instructions for the spill emitted by
         // `emit_lazy_funcref` will be jumped over if the funcref was previously
@@ -1695,10 +1695,10 @@ where
         let type_index = TypeIndex::from_u32(type_index);
         let table_index = TableIndex::from_u32(table_index);
 
-        self.emit_lazy_init_funcref(table_index)?;
+        self.emit_table_get(table_index)?;
 
         // Perform the indirect call.
-        // This code assumes that [`Self::emit_lazy_init_funcref`] will
+        // This code assumes that [`Self::emit_table_get`] will
         // push the funcref to the value stack.
         let funcref_ptr = self
             .context
@@ -1733,74 +1733,17 @@ where
     }
 
     fn visit_table_copy(&mut self, dst: u32, src: u32) -> Self::Output {
-        let at = self.context.stack.ensure_index_at(3)?;
-        self.context
-            .stack
-            .insert_many(at, &[dst.try_into()?, src.try_into()?]);
-
-        let builtin = self.env.builtins.table_copy::<M::ABI>()?;
-        FnCall::emit::<M>(
-            &mut self.env,
-            self.masm,
-            &mut self.context,
-            Callee::Builtin(builtin),
-        )?;
-        self.context.pop_and_free(self.masm)
+        self.emit_table_copy(TableIndex::from_u32(dst), TableIndex::from_u32(src))
     }
 
     fn visit_table_get(&mut self, table: u32) -> Self::Output {
         let table_index = TableIndex::from_u32(table);
-        let table = self.env.table(table_index);
-        let heap_type = table.ref_type.heap_type;
-
-        match heap_type {
-            WasmHeapType::Func => self.emit_lazy_init_funcref(table_index),
-            _ => Err(format_err!(CodeGenError::unsupported_wasm_type())),
-        }
+        self.emit_table_get(table_index)
     }
 
     fn visit_table_grow(&mut self, table: u32) -> Self::Output {
         let table_index = TableIndex::from_u32(table);
-        let ptr_type = self.env.ptr_type();
-        let (heap_type, idx_type) = {
-            let table_ty = self.env.table(table_index);
-            (table_ty.ref_type.heap_type, table_ty.idx_type)
-        };
-        let builtin = match heap_type {
-            WasmHeapType::Func => self.env.builtins.table_grow_func_ref::<M::ABI>()?,
-            _ => bail!(CodeGenError::unsupported_wasm_type()),
-        };
-
-        let len = self.context.stack.len();
-        // table.grow` requires at least 2 elements on the value stack.
-        let at = self.context.stack.ensure_index_at(2)?;
-
-        // The table_grow builtin expects the parameters in a different
-        // order.
-        // The value stack at this point should contain:
-        // [ init_value | delta ] (stack top)
-        // but the builtin function expects the init value as the last
-        // argument.
-        self.context.stack.inner_mut().swap(len - 1, len - 2);
-
-        let builtin = self.prepare_builtin_defined_table_arg(table_index, at, builtin)?;
-
-        FnCall::emit::<M>(&mut self.env, self.masm, &mut self.context, builtin)?;
-
-        // Similar to the memory.grow builtin, `table.grow` returns a
-        // pointer, however, we need to ensure that the returned index
-        // is representative of the address space for tables.
-        match (ptr_type, idx_type) {
-            (WasmValType::I64, IndexType::I64) => Ok(()),
-            (WasmValType::I64, IndexType::I32) => {
-                let top: Reg = self.context.pop_to_reg(self.masm, None)?.into();
-                self.masm.wrap(writable!(top), top)?;
-                self.context.stack.push(TypedReg::i32(top).into());
-                Ok(())
-            }
-
-            _ => Err(format_err!(CodeGenError::unsupported_32_bit_platform())),
-        }
+        self.emit_table_grow(table_index)
     }
 
     fn visit_table_size(&mut self, table: u32) -> Self::Output {
@@ -1811,56 +1754,12 @@ where
 
     fn visit_table_fill(&mut self, table: u32) -> Self::Output {
         let table_index = TableIndex::from_u32(table);
-        let table_ty = self.env.table(table_index);
-
-        ensure!(
-            table_ty.ref_type.heap_type == WasmHeapType::Func,
-            CodeGenError::unsupported_wasm_type()
-        );
-
-        let builtin = self.env.builtins.table_fill_func_ref::<M::ABI>()?;
-
-        let at = self.context.stack.ensure_index_at(3)?;
-
-        let callee = self.prepare_builtin_defined_table_arg(table_index, at, builtin)?;
-        FnCall::emit::<M>(&mut self.env, self.masm, &mut self.context, callee)?;
-
-        self.context.pop_and_free(self.masm)
+        self.emit_table_fill(table_index)
     }
 
     fn visit_table_set(&mut self, table: u32) -> Self::Output {
-        let ptr_type = self.env.ptr_type();
         let table_index = TableIndex::from_u32(table);
-        let table_data = self.env.resolve_table_data(table_index);
-        let table = self.env.table(table_index);
-        match table.ref_type.heap_type {
-            WasmHeapType::Func => {
-                ensure!(
-                    self.tunables.table_lazy_init,
-                    CodeGenError::unsupported_table_eager_init()
-                );
-                let value = self.context.pop_to_reg(self.masm, None)?;
-                let index = self.context.pop_to_reg(self.masm, None)?;
-                let base = self.context.any_gpr(self.masm)?;
-                let elem_addr =
-                    self.emit_compute_table_elem_addr(index.into(), base, &table_data)?;
-                // Set the initialized bit.
-                self.masm.or(
-                    writable!(value.into()),
-                    value.into(),
-                    RegImm::i64(FUNCREF_INIT_BIT as i64),
-                    ptr_type.try_into()?,
-                )?;
-
-                self.masm.store_ptr(value.into(), elem_addr)?;
-
-                self.context.free_reg(value);
-                self.context.free_reg(index);
-                self.context.free_reg(base);
-                Ok(())
-            }
-            _ => Err(format_err!(CodeGenError::unsupported_wasm_type())),
-        }
+        self.emit_table_set(table_index)
     }
 
     fn visit_elem_drop(&mut self, index: u32) -> Self::Output {

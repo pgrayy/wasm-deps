@@ -1638,7 +1638,7 @@ pub fn translate_operator(
             let len = environ.stacks.pop1();
             let val = environ.stacks.pop1();
             let dest = environ.stacks.pop1();
-            environ.translate_memory_fill(builder, mem, dest, val, len);
+            environ.translate_memory_fill(builder, mem, dest, val, len)?;
         }
         Operator::MemoryInit { data_index, mem } => {
             let mem = MemoryIndex::from_u32(*mem);
@@ -1653,7 +1653,7 @@ pub fn translate_operator(
         }
         Operator::TableSize { table: index } => {
             let result =
-                environ.translate_table_size(builder.cursor(), TableIndex::from_u32(*index))?;
+                environ.translate_table_size(builder.cursor(), TableIndex::from_u32(*index));
             environ.stacks.push1(result);
         }
         Operator::TableGrow { table: index } => {
