@@ -5,13 +5,46 @@ on:
     types: [published]
 
 jobs:
-  build-macos-arm64:
-    name: Build macOS arm64 wheel
+  build-wasmtime:
+    name: Build wasmtime C API (macOS arm64)
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build wasmtime C API
+        working-directory: wasmtime
+        run: cargo build --release -p wasmtime-c-api
+
+      - name: Package tarball (matching upstream format)
+        run: |
+          VERSION=${{ github.event.release.tag_name }}
+          DIR="wasmtime-${VERSION}-aarch64-macos-c-api"
+          mkdir -p "${DIR}/lib"
+          cp wasmtime/target/release/libwasmtime.dylib "${DIR}/lib/"
+          cp -r wasmtime/crates/c-api/include "${DIR}/include"
+          sed -e 's/#cmakedefine \(WASMTIME_FEATURE_.*\)/#define \1/' \
+            wasmtime/crates/c-api/include/wasmtime/conf.h.in \
+            > "${DIR}/include/wasmtime/conf.h"
+          tar cJf "${DIR}.tar.xz" "${DIR}"
+
+      - name: Upload tarball to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: wasmtime-*-c-api.tar.xz
+          tag_name: ${{ github.event.release.tag_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-wheel:
+    name: Build macOS arm64 wheel
+    needs: [build-wasmtime]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -23,25 +56,10 @@ jobs:
       - name: Set version from release tag
         run: sed -i '' 's/^version = .*/version = "'"$(echo ${{ github.event.release.tag_name }} | sed 's/^v//')"'"/' wasmtime-py/pyproject.toml
 
-      - name: Build wasmtime C API from source
-        working-directory: wasmtime
-        run: cargo build --release -p wasmtime-c-api
+      - name: Set download version to release tag
+        run: sed -i '' 's/^WASMTIME_VERSION = .*/WASMTIME_VERSION = "${{ github.event.release.tag_name }}"/' wasmtime-py/ci/download-wasmtime.py
 
-      - name: Place library and headers
-        run: |
-          mkdir -p wasmtime-py/wasmtime/darwin-aarch64
-          cp wasmtime/target/release/libwasmtime.dylib wasmtime-py/wasmtime/darwin-aarch64/_libwasmtime.dylib
-          rm -rf wasmtime-py/wasmtime/include
-          cp -r wasmtime/crates/c-api/include wasmtime-py/wasmtime/include
-          sed -e 's/#cmakedefine \(WASMTIME_FEATURE_.*\)/#define \1/' \
-            wasmtime/crates/c-api/include/wasmtime/conf.h.in \
-            > wasmtime-py/wasmtime/include/wasmtime/conf.h
-
-      - name: Generate Python bindings
-        working-directory: wasmtime-py
-        run: python ci/cbindgen.py wasmtime/include/wasmtime.h > wasmtime/_bindings.py
-
-      - name: Build wheel
+      - name: Build wheel (downloads from our release)
         working-directory: wasmtime-py
         run: python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
 
@@ -52,7 +70,7 @@ jobs:
 
   publish:
     name: Publish
-    needs: [build-macos-arm64]
+    needs: [build-wheel]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -63,7 +81,7 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Upload to GitHub Release
+      - name: Upload wheels to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.whl

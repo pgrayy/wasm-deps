@@ -10,7 +10,6 @@ See
 import subprocess
 import sys
 
-from pathlib import Path
 from typing import Union
 
 # `from ... import *` is intentional and necessary, so that any PEP-517 hooks
@@ -74,20 +73,17 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 
     This is a PEP-517 build backend function.
     """
-    # Skip download if the library was already placed (e.g., built from source in CI)
-    existing_libs = list(Path('wasmtime').glob('*/_libwasmtime*')) + list(Path('wasmtime').glob('*/_wasmtime*'))
-    if not existing_libs:
-        plat_name = get_plat_name(config_settings)
-        if plat_name is not None:
-            download_args = plat_name_to_download_args(plat_name)
-        elif config_settings is not None and '--wasmtime-py-mingw-any' in config_settings:
-            download_args = ['win32', 'x86_64']
-        else:
-            download_args = []
+    plat_name = get_plat_name(config_settings)
+    if plat_name is not None:
+        download_args = plat_name_to_download_args(plat_name)
+    elif config_settings is not None and '--wasmtime-py-mingw-any' in config_settings:
+        download_args = ['win32', 'x86_64']
+    else:
+        download_args = []
 
-        subprocess.run(
-            [sys.executable, 'ci/download-wasmtime.py', *download_args],
-            check=True,
-        )
+    subprocess.run(
+        [sys.executable, 'ci/download-wasmtime.py', *download_args],
+        check=True,
+    )
 
     return build_meta_orig.build_wheel(wheel_directory, config_settings, metadata_directory)
