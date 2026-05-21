@@ -116,11 +116,13 @@ def _type_annotation(ref: TypeRef, ir: Resolve) -> str:
     For named types, uses the public class name. For containers, recurses.
     """
     if ref.is_primitive:
+        assert ref.primitive is not None
         return _PRIMITIVE_ANNOTATIONS[ref.primitive]
     canonical = ref.canonical(ir)
     if canonical.is_primitive:
+        assert canonical.primitive is not None
         return _PRIMITIVE_ANNOTATIONS[canonical.primitive]
-    t = ir.types[canonical.type_id]
+    t = canonical.resolve(ir)
 
     if t.name is not None:
         return _pascal(t.name)
@@ -169,7 +171,7 @@ def _wrap_field_for_storage(ty: TypeRef, value_expr: str, ir: Resolve, ctx: _tag
     canonical = ty.canonical(ir)
     if canonical.is_primitive:
         return value_expr
-    target = ir.types[canonical.type_id]
+    target = canonical.resolve(ir)
     if isinstance(target.kind, Option) and _tagging.option_is_tagged(canonical, ctx):
         return f"(_WitVariant('none') if {value_expr} is None else _WitVariant('some', {value_expr}))"
     return value_expr
@@ -184,7 +186,7 @@ def _unwrap_field_for_read(ty: TypeRef, value_expr: str, ir: Resolve, ctx: _tagg
     canonical = ty.canonical(ir)
     if canonical.is_primitive:
         return value_expr
-    target = ir.types[canonical.type_id]
+    target = canonical.resolve(ir)
     if isinstance(target.kind, Option) and _tagging.option_is_tagged(canonical, ctx):
         return f"(None if {value_expr}.tag == 'none' else {value_expr}.payload)"
     return value_expr
@@ -491,7 +493,7 @@ def emit_module(ir: Resolve) -> str:
             target = t.kind.target.canonical(ir)
             if target.is_primitive:
                 continue
-            target_t = ir.types[target.type_id]
+            target_t = target.resolve(ir)
             if target_t.name is None or target_t.name == t.name:
                 continue
             out.write(f"\n{_type_name(t, ir)} = {_type_name(target_t, ir)}\n")

@@ -17,11 +17,12 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import _emit, _ir
 
 
-def _dump_wit_ir(wit_path: Path) -> dict:
+def _dump_wit_ir(wit_path: Path) -> Any:
     result = subprocess.run(
         ["wasm-tools", "component", "wit", "--json", str(wit_path)],
         check=True,
