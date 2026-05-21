@@ -24,7 +24,7 @@ jobs:
           targets: wasm32-wasip2
       - run: cargo fmt --all -- --check
         working-directory: wasmtime
-      - run: cargo clippy --workspace --all-targets -p wasmtime-c-api
+      - run: cargo clippy -p wasmtime-c-api --all-targets
         working-directory: wasmtime
 
   build-wasmtime:
