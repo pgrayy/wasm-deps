@@ -55,9 +55,7 @@ jobs:
       - run: uv run ci/download-wasmtime.py
       - run: pip install build
       - name: Build wheel (macOS arm64)
-        run: |
-          git clean -fdx wasmtime build
-          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
+        run: python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-macos-arm64
