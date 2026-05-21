@@ -10,7 +10,7 @@ backend-path = [
 ]
 
 [project]
-name = "pgrayy-wasmtime-py"
+name = "pgrayy-wasmtime"
 dynamic = [
     "version",
 ]
