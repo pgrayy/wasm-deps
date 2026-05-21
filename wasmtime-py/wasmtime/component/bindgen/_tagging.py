@@ -65,6 +65,7 @@ def _ref_classes(ref: TypeRef, ctx: TaggingCtx, _stack: Optional[set[int]] = Non
     """Return the case-class set wasmtime-py would use to distinguish this
     type as a variant arm payload."""
     if ref.is_primitive:
+        assert ref.primitive is not None
         return frozenset({_PRIMITIVE_CLASSES[ref.primitive]})
 
     type_id = ref.type_id
@@ -117,8 +118,6 @@ def _ref_classes(ref: TypeRef, ctx: TaggingCtx, _stack: Optional[set[int]] = Non
             result = acc
     elif isinstance(kind, (Resource, Handle)):
         result = frozenset({"ResourceAny", "ResourceHost"})
-    else:
-        result = frozenset({"object"})
 
     ctx._classes[type_id] = result
     return result
@@ -156,7 +155,8 @@ def variant_is_tagged(ref: TypeRef, ctx: TaggingCtx) -> bool:
     wasmtime-py boundary? Aliases are followed."""
     canonical = ref.canonical(ctx.ir)
     assert not canonical.is_primitive
-    t = ctx.ir.types[canonical.type_id]
+    assert canonical.type_id is not None
+    t = canonical.resolve(ctx.ir)
     assert isinstance(t.kind, Variant), f"variant_is_tagged called on {type(t.kind).__name__}"
     return _variant_is_tagged(canonical.type_id, ctx, set())
 
@@ -170,7 +170,7 @@ def option_is_tagged(ref: TypeRef, ctx: TaggingCtx) -> bool:
     """
     canonical = ref.canonical(ctx.ir)
     assert not canonical.is_primitive
-    t = ctx.ir.types[canonical.type_id]
+    t = canonical.resolve(ctx.ir)
     assert isinstance(t.kind, Option), f"option_is_tagged called on {type(t.kind).__name__}"
     return "object" in _ref_classes(t.kind.inner, ctx)
 
@@ -183,7 +183,7 @@ def result_is_tagged(ref: TypeRef, ctx: TaggingCtx) -> bool:
     """
     canonical = ref.canonical(ctx.ir)
     assert not canonical.is_primitive
-    t = ctx.ir.types[canonical.type_id]
+    t = canonical.resolve(ctx.ir)
     assert isinstance(t.kind, Result), f"result_is_tagged called on {type(t.kind).__name__}"
     ok = _ref_classes(t.kind.ok, ctx) if t.kind.ok is not None else frozenset({"object"})
     err = _ref_classes(t.kind.err, ctx) if t.kind.err is not None else frozenset({"object"})
