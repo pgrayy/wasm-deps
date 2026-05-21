@@ -5,11 +5,12 @@ on:
     types: [published]
 
 jobs:
-  build-wheels:
-    name: Build macOS wheels
+  build-and-publish:
+    name: Build and publish macOS wheels
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,7 +21,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: pip install build
+        run: pip install build twine
 
       - name: Build wheel (macOS x86_64)
         working-directory: wasmtime-py
@@ -41,3 +42,10 @@ jobs:
           tag_name: ${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to PyPI
+        working-directory: wasmtime-py
+        run: twine upload dist/*.whl
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
