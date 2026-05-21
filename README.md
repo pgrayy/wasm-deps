@@ -18,37 +18,31 @@ git subtree pull --prefix=wasmtime https://github.com/bytecodealliance/wasmtime.
 git subtree pull --prefix=wasmtime-py https://github.com/bytecodealliance/wasmtime-py.git main --squash
 ```
 
+Always pull wasmtime first, then wasmtime-py (wasmtime-py may depend on new C API symbols).
+
 ## Releasing
 
 Releases are triggered by publishing a GitHub Release. The release workflow builds a macOS arm64 C API tarball and a wasmtime-py wheel, attaches them to the release, and publishes the wheel to PyPI.
 
 ### Steps
 
-1. Check the wasmtime version in the subtree:
-   ```bash
-   grep '^version' wasmtime/Cargo.toml
-   ```
+1. Update `wasmtime-py/VERSION` to the new version (e.g., `46.0.0`).
 
-2. Update `wasmtime-py/VERSION` to match:
-   ```bash
-   echo "46.0.0" > wasmtime-py/VERSION
-   ```
+2. Update `WASMTIME_VERSION` in `wasmtime-py/ci/download-wasmtime.py` to the tag you're about to create (e.g., `v46.0.0`).
 
-3. Update `WASMTIME_VERSION` in `wasmtime-py/ci/download-wasmtime.py` to the tag you're about to create (e.g., `v46.0.0`).
-
-4. Commit and push to main:
+3. Commit both changes as a **single commit** and push. This must be the last commit before tagging (setuptools-git-versioning counts commits after the VERSION change and appends suffixes if any exist):
    ```bash
    git add wasmtime-py/VERSION wasmtime-py/ci/download-wasmtime.py
    git commit -m "chore: bump versions to v46.0.0"
    git push
    ```
 
-5. Create the release:
+4. Create the release targeting that commit:
    ```bash
-   gh release create v46.0.0 --title "v46.0.0" --notes "Wasmtime 46.0.0" --target main
+   gh release create v46.0.0 --title "v46.0.0" --notes "Wasmtime 46.0.0" --target $(git rev-parse HEAD)
    ```
 
-6. Wait for the release workflow to complete. It will attach the tarball and wheel to the release and publish to PyPI.
+5. Wait for the release workflow to complete. It will attach the tarball and wheel to the release and publish to PyPI.
 
 ### Install from a release
 
