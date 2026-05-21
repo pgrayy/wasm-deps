@@ -22,4 +22,3 @@ runs:
   # Download precompiled wasmtime binaries for running the project
   - run: uv run ci/download-wasmtime.py
     shell: bash
-    working-directory: wasmtime-py

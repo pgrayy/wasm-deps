@@ -1,15 +1,12 @@
-name: CI
+name: "wasmtime-py: CI"
 on:
   push:
     branches: [main]
-    tags-ignore: [dev]
   pull_request:
     branches: [main]
 
-# Cancel any in-flight jobs for the same PR/branch so there's only one active
-# at a time
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: wasmtime-py-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -18,43 +15,10 @@ jobs:
     defaults:
       run:
         working-directory: wasmtime-py
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.x']
     steps:
       - uses: actions/checkout@v4
       - uses: ./wasmtime-py/.github/actions/setup
-        with:
-          python-version: ${{ matrix.python-version }}
       - run: uv run --all-extras pytest
-
-  build:
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: wasmtime-py
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        # Fetch history & tags so setuptools-git-versioning can generate a
-        # unique .devN suffix on untagged builds uploaded to test.pypi.org.
-        # See `tool.setuptools-git-versioning` in `pyproject.toml`.
-        fetch-depth: 0
-    - uses: ./wasmtime-py/.github/actions/setup
-    - run: pip install build
-    - name: Build sdist (source distribution)
-      run: |
-        git clean -fdx wasmtime build
-        python -m build --sdist
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
-
-    - uses: actions/upload-artifact@v4
-      with:
-        name: dists
-        path: wasmtime-py/dist
 
   coverage:
     runs-on: macos-latest
@@ -62,26 +26,38 @@ jobs:
       run:
         working-directory: wasmtime-py
     steps:
-    - uses: actions/checkout@v4
-    - uses: ./wasmtime-py/.github/actions/setup
-    - run: uv run --all-extras coverage run -m pytest
-    - run: uv run --all-extras coverage html
-    - uses: actions/upload-artifact@v4
-      with:
-        name: coverage
-        path: wasmtime-py/htmlcov
+      - uses: actions/checkout@v4
+      - uses: ./wasmtime-py/.github/actions/setup
+      - run: uv run --all-extras coverage run -m pytest
+      - run: uv run --all-extras coverage html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasmtime-py-coverage
+          path: wasmtime-py/htmlcov
 
-  upload_dists:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
+  build-wheel:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: wasmtime-py
     steps:
-    - uses: actions/download-artifact@v4
-      with:
-        name: dists
-        path: dist
-
-    - name: Publish distribution to PyPI
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
-      uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: actions/checkout@v4
+        with:
+          # Fetch history & tags so setuptools-git-versioning can generate a
+          # unique .devN suffix on untagged builds uploaded to test.pypi.org.
+          # See `tool.setuptools-git-versioning` in `pyproject.toml`.
+          fetch-depth: 0
+      - uses: ./wasmtime-py/.github/actions/setup
+      - run: pip install build
+      - name: Build sdist
+        run: |
+          git clean -fdx wasmtime build
+          python -m build --sdist
+      - name: Build wheel (macOS arm64)
+        run: |
+          git clean -fdx wasmtime build
+          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasmtime-py-dists
+          path: wasmtime-py/dist
