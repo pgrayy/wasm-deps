@@ -50,7 +50,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip1,wasm32-wasip2
+          targets: wasm32-wasip1,wasm32-wasip2,wasm32-unknown-unknown
       - name: Install Ninja
         run: brew install ninja
       - name: Build and run C API tests
