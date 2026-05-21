@@ -1,5 +1,0 @@
-package local:smoke;
-
-world the-world {
-  export expected: func();
-}

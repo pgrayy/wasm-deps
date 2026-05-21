@@ -1,5 +1,0 @@
-package local:hello;
-
-interface hello {
-  hello: func(name: string) -> string;
-}

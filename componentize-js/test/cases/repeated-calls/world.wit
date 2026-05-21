@@ -1,7 +1,0 @@
-package local:hello;
-
-world hello {
-  export exports: interface {
-    hello: func() -> string;
-  }
-}

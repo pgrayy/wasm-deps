@@ -1,7 +1,0 @@
-package local:b;
-
-interface foo {
-  record bar {
-    thing: u8
-  }
-}

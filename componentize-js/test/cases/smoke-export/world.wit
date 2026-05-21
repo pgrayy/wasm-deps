@@ -1,7 +1,0 @@
-package local:smoke-export;
-
-world the-world {
-  export the-name: interface {
-    y: func();
-  }
-}
