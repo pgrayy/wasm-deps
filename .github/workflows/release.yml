@@ -19,8 +19,9 @@ jobs:
         run: cargo build --release -p wasmtime-c-api
 
       - name: Package tarball
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
         run: |
-          VERSION=${{ github.event.release.tag_name }}
           DIR="wasmtime-${VERSION}-aarch64-macos-c-api"
           mkdir -p "${DIR}/lib" "${DIR}/include"
           cp wasmtime/target/release/libwasmtime.dylib "${DIR}/lib/"
@@ -47,7 +48,11 @@ jobs:
         working-directory: wasmtime-py
     steps:
       - uses: actions/checkout@v4
-      - uses: ./wasmtime-py/.github/actions/setup
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - uses: astral-sh/setup-uv@v7
+      - run: uv run ci/download-wasmtime.py
       - run: pip install build
       - name: Build wheel (macOS arm64)
         run: |
