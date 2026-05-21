@@ -98,7 +98,12 @@ class Store(Managed["ctypes._Pointer[ffi.wasmtime_store_t]"]):
             raise WasmtimeError._from_ptr(error)
 
     def set_wasi_http(self) -> None:
-        """Configures WASI HTTP support for this store. Must be called after set_wasi()."""
+        """
+        Initializes the WASI HTTP context for this store.
+
+        Must be called before instantiating a component that uses `wasi:http`.
+        Requires WASI to be configured first via `set_wasi()`.
+        """
         ffi.wasmtime_context_set_wasi_http(self._context())
 
     def set_epoch_deadline(self, ticks_after_current: int) -> None:
