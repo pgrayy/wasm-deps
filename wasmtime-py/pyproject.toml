@@ -75,5 +75,11 @@ include = [
 
 [tool.setuptools-git-versioning]
 # https://setuptools-git-versioning.readthedocs.io/en/stable/options/index.html
-enabled = false
+enabled = true
 version_file = "VERSION"
+count_commits_from_version_file = true
+# Version for distributions built from an untagged commit.
+# Version "1.0.0.dev4" is a treated as a pre-release of Version "1.0.0".
+# {tag}: Version under development, read from `version_file`
+# {ccount}: Count of commits since `version_file` was last changed
+dev_template = "{tag}.dev{ccount}"
