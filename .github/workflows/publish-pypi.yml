@@ -20,6 +20,9 @@ jobs:
       - name: Install build tools
         run: pip install build pycparser
 
+      - name: Set version from release tag
+        run: sed -i '' 's/^version = .*/version = "'"$(echo ${{ github.event.release.tag_name }} | sed 's/^v//')"'"/' wasmtime-py/pyproject.toml
+
       - name: Build wasmtime C API from source
         working-directory: wasmtime
         run: cargo build --release -p wasmtime-c-api
