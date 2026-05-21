@@ -1,0 +1,65 @@
+name: Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-wasmtime:
+    name: Build wasmtime C API
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - name: Build C API
+        working-directory: wasmtime
+        run: cargo build --release -p wasmtime-c-api
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasmtime-c-api
+          path: wasmtime/target/release/libwasmtime.dylib
+
+  test-wasmtime:
+    name: Test wasmtime C API
+    needs: [build-wasmtime]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - name: Install Ninja
+        run: brew install ninja
+      - name: Build and run C API tests
+        working-directory: wasmtime
+        run: |
+          cmake -G Ninja -Sexamples -DCMAKE_BUILD_TYPE=Debug -Bexamples/build \
+            -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=ON -DBUILD_RUST_EXAMPLES=ON
+          ninja -C examples/build
+          ninja -C examples/build test
+        env:
+          CTEST_OUTPUT_ON_FAILURE: 1
+          CTEST_PARALLEL_LEVEL: 4
+
+  test-wasmtime-py:
+    name: Test wasmtime-py
+    needs: [build-wasmtime]
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: wasmtime-py
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./wasmtime-py/.github/actions/setup
+      - run: uv run --all-extras pytest

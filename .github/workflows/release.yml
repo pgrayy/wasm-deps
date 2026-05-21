@@ -1,12 +1,11 @@
-name: Publish wasmtime-py wheels
-
+name: Release
 on:
   release:
     types: [published]
 
 jobs:
   build-wasmtime:
-    name: Build wasmtime C API (macOS arm64)
+    name: Build wasmtime C API tarball
     runs-on: macos-latest
     permissions:
       contents: write
@@ -15,23 +14,23 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build wasmtime C API
+      - name: Build C API
         working-directory: wasmtime
         run: cargo build --release -p wasmtime-c-api
 
-      - name: Package tarball (matching upstream format)
+      - name: Package tarball
         run: |
           VERSION=${{ github.event.release.tag_name }}
           DIR="wasmtime-${VERSION}-aarch64-macos-c-api"
-          mkdir -p "${DIR}/lib"
+          mkdir -p "${DIR}/lib" "${DIR}/include"
           cp wasmtime/target/release/libwasmtime.dylib "${DIR}/lib/"
-          cp -r wasmtime/crates/c-api/include "${DIR}/include"
+          cp -r wasmtime/crates/c-api/include/* "${DIR}/include/"
           sed -e 's/#cmakedefine \(WASMTIME_FEATURE_.*\)/#define \1/' \
             wasmtime/crates/c-api/include/wasmtime/conf.h.in \
             > "${DIR}/include/wasmtime/conf.h"
           tar cJf "${DIR}.tar.xz" "${DIR}"
 
-      - name: Upload tarball to GitHub Release
+      - name: Upload tarball to release
         uses: softprops/action-gh-release@v2
         with:
           files: wasmtime-*-c-api.tar.xz
@@ -40,30 +39,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-wheel:
-    name: Build macOS arm64 wheel
+    name: Build wasmtime-py wheel
     needs: [build-wasmtime]
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: wasmtime-py
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install build tools
-        run: pip install build pycparser
-
-      - name: Build wheel (downloads from our release)
-        working-directory: wasmtime-py
-        run: python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
-
+      - uses: ./wasmtime-py/.github/actions/setup
+      - run: pip install build
+      - name: Build wheel (macOS arm64)
+        run: |
+          git clean -fdx wasmtime build
+          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-macos-arm64
           path: wasmtime-py/dist/*.whl
 
   publish:
-    name: Publish
+    name: Publish to PyPI
     needs: [build-wheel]
     runs-on: ubuntu-latest
     permissions:
@@ -75,7 +71,7 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Upload wheels to GitHub Release
+      - name: Upload wheels to release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.whl
