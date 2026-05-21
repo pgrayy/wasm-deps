@@ -53,12 +53,6 @@ jobs:
       - name: Install build tools
         run: pip install build pycparser
 
-      - name: Set version from release tag
-        run: echo "${{ github.event.release.tag_name }}" | sed 's/^v//' > wasmtime-py/VERSION
-
-      - name: Set download version to release tag
-        run: sed -i '' 's/^WASMTIME_VERSION = .*/WASMTIME_VERSION = "${{ github.event.release.tag_name }}"/' wasmtime-py/ci/download-wasmtime.py
-
       - name: Build wheel (downloads from our release)
         working-directory: wasmtime-py
         run: python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
