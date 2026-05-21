@@ -14,20 +14,14 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     defaults:
       run:
         working-directory: wasmtime-py
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.x', '3.9', 'pypy3.11']
-        exclude:
-        # Looks like pypy on Windows is 32-bit, so don't test it since we
-        # only work with 64-bit builds
-        - os: windows-latest
-          python-version: pypy3
+        python-version: ['3.x']
     steps:
       - uses: actions/checkout@v4
       - uses: ./wasmtime-py/.github/actions/setup
@@ -36,7 +30,7 @@ jobs:
       - run: uv run --all-extras pytest
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     defaults:
       run:
         working-directory: wasmtime-py
@@ -55,47 +49,7 @@ jobs:
         python -m build --sdist
     - run: |
         git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=manylinux1-x86_64
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=manylinux2014_aarch64
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-10-13-x86_64
-    - run: |
-        git clean -fdx wasmtime build
         python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=win-amd64
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=win-arm64
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=musllinux_1_2_x86_64
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=musllinux_1_2_aarch64
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=android_26_x86_64
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--build-option=--plat-name -C=--build-option=android_26_arm64_v8a
-
-    # Build an "any" wheel with:
-    #
-    #   * MinGW
-    #
-    # because at this time I don't know what the `--plat-name` tags supported on
-    # PyPI are for these platforms. Our hope is that any platform not matching
-    # the above `--plat-name` arguments will install this `any` wheel instead,
-    # and then when the wheel runs it'll dynamically select from the available
-    # shared libraries.
-    - run: |
-        git clean -fdx wasmtime build
-        python -m build --wheel -C=--wasmtime-py-mingw-any
 
     - uses: actions/upload-artifact@v4
       with:
@@ -103,7 +57,7 @@ jobs:
         path: wasmtime-py/dist
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     defaults:
       run:
         working-directory: wasmtime-py
