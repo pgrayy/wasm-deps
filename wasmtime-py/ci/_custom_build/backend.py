@@ -74,16 +74,28 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     This is a PEP-517 build backend function.
     """
     plat_name = get_plat_name(config_settings)
-    if plat_name is not None:
+
+    # Skip download if the library was already placed (e.g., built from source in CI)
+    from pathlib import Path
+    existing_libs = list(Path('wasmtime').glob('*/_libwasmtime*')) + list(Path('wasmtime').glob('*/_wasmtime*'))
+    if existing_libs:
+        print(f"Skipping download: found existing library at {existing_libs[0]}")
+    elif plat_name is not None:
         download_args = plat_name_to_download_args(plat_name)
+        subprocess.run(
+            [sys.executable, 'ci/download-wasmtime.py', *download_args],
+            check=True,
+        )
     elif config_settings is not None and '--wasmtime-py-mingw-any' in config_settings:
         download_args = ['win32', 'x86_64']
+        subprocess.run(
+            [sys.executable, 'ci/download-wasmtime.py', *download_args],
+            check=True,
+        )
     else:
-        download_args = []
-
-    subprocess.run(
-        [sys.executable, 'ci/download-wasmtime.py', *download_args],
-        check=True,
-    )
+        subprocess.run(
+            [sys.executable, 'ci/download-wasmtime.py'],
+            check=True,
+        )
 
     return build_meta_orig.build_wheel(wheel_directory, config_settings, metadata_directory)

@@ -5,9 +5,9 @@ on:
     types: [published]
 
 jobs:
-  build-and-publish:
-    name: Build and publish macOS wheels
-    runs-on: ubuntu-latest
+  build-macos-arm64:
+    name: Build macOS arm64 wheel
+    runs-on: macos-latest
     permissions:
       contents: write
       id-token: write
@@ -16,29 +16,57 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install build tools
-        run: pip install build
+        run: pip install build pycparser
 
-      - name: Build wheel (macOS x86_64)
-        working-directory: wasmtime-py
-        run: |
-          git clean -fdx wasmtime build
-          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-10-13-x86_64
+      - name: Build wasmtime from source
+        working-directory: wasmtime
+        run: cargo build --release -p wasmtime-c-api
 
-      - name: Build wheel (macOS arm64)
-        working-directory: wasmtime-py
+      - name: Place library and headers where wasmtime-py expects them
         run: |
-          git clean -fdx wasmtime build
-          python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
+          mkdir -p wasmtime-py/wasmtime/darwin-aarch64
+          cp wasmtime/target/release/libwasmtime.dylib wasmtime-py/wasmtime/darwin-aarch64/_libwasmtime.dylib
+          rm -rf wasmtime-py/wasmtime/include
+          cp -r wasmtime/crates/c-api/include wasmtime-py/wasmtime/include
+
+      - name: Generate Python bindings from headers
+        working-directory: wasmtime-py
+        run: python ci/cbindgen.py wasmtime/include/wasmtime.h > wasmtime/_bindings.py
+
+      - name: Build wheel (skips download since library already exists)
+        working-directory: wasmtime-py
+        run: python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-macos-arm64
+          path: wasmtime-py/dist/*.whl
+
+  publish:
+    name: Publish to PyPI
+    needs: [build-macos-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Upload wheels to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: wasmtime-py/dist/*.whl
+          files: dist/*.whl
           tag_name: ${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,4 +74,4 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: wasmtime-py/dist/
+          packages-dir: dist/
