@@ -51,8 +51,6 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.x'
-      - uses: astral-sh/setup-uv@v7
-      - run: uv run ci/download-wasmtime.py
       - run: pip install build
       - name: Build wheel (macOS arm64)
         run: python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
