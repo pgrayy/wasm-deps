@@ -9,6 +9,7 @@ permissions:
 jobs:
   build-wasmtime:
     name: Build wasmtime
+    if: startsWith(github.event.release.tag_name, 'wasmtime-v')
     runs-on: macos-latest
     permissions:
       contents: write
@@ -42,6 +43,7 @@ jobs:
   build-wasmtime-py:
     name: Build wasmtime-py
     needs: [build-wasmtime]
+    if: startsWith(github.event.release.tag_name, 'wasmtime-v')
     runs-on: macos-latest
     defaults:
       run:
@@ -58,28 +60,6 @@ jobs:
         with:
           name: wheel-macos-arm64
           path: wasmtime-py/dist/*.whl
-
-  build-token-generator:
-    name: Build aws-bedrock-token-generator-js
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    defaults:
-      run:
-        working-directory: aws-bedrock-token-generator-js
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - run: npm ci
-      - run: npm run build
-      - run: npm test
-      - run: npm pack
-      - name: Upload tarball to release
-        run: gh release upload "${{ github.event.release.tag_name }}" *.tgz --repo ${{ github.repository }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish-wasmtime-py:
     name: Publish wasmtime-py
@@ -103,3 +83,26 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+
+  build-token-generator:
+    name: Build aws-bedrock-token-generator-js
+    if: startsWith(github.event.release.tag_name, 'token-gen-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: aws-bedrock-token-generator-js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm pack
+      - name: Upload tarball to release
+        run: gh release upload "${{ github.event.release.tag_name }}" *.tgz --repo ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
