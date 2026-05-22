@@ -73,7 +73,7 @@ jobs:
           merge-multiple: true
 
       - name: Upload to release
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.whl
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.whl --repo ${{ github.repository }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
