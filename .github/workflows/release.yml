@@ -3,9 +3,12 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   build-wasmtime:
-    name: Build wasmtime C API tarball
+    name: Build wasmtime
     runs-on: macos-latest
     permissions:
       contents: write
@@ -14,11 +17,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build C API
+      - name: Build
         working-directory: wasmtime
         run: cargo build --release -p wasmtime-c-api
 
-      - name: Package tarball
+      - name: Package
         env:
           VERSION: ${{ github.event.release.tag_name }}
         run: |
@@ -31,16 +34,13 @@ jobs:
             > "${DIR}/include/wasmtime/conf.h"
           tar cJf "${DIR}.tar.xz" "${DIR}"
 
-      - name: Upload tarball to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: wasmtime-*-c-api.tar.xz
-          tag_name: ${{ github.event.release.tag_name }}
+      - name: Upload to release
+        run: gh release upload "${{ github.event.release.tag_name }}" wasmtime-*-c-api.tar.xz
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-wheel:
-    name: Build wasmtime-py wheel
+  build-wasmtime-py:
+    name: Build wasmtime-py
     needs: [build-wasmtime]
     runs-on: macos-latest
     defaults:
@@ -52,7 +52,7 @@ jobs:
         with:
           python-version: '3.x'
       - run: pip install build
-      - name: Build wheel (macOS arm64)
+      - name: Build wheel
         run: python -m build --wheel -C=--build-option=--plat-name -C=--build-option=macosx-11-0-arm64
       - uses: actions/upload-artifact@v4
         with:
@@ -60,8 +60,8 @@ jobs:
           path: wasmtime-py/dist/*.whl
 
   publish:
-    name: Publish to PyPI
-    needs: [build-wheel]
+    name: Publish
+    needs: [build-wasmtime-py]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -72,13 +72,10 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Upload wheels to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.whl
-          tag_name: ${{ github.event.release.tag_name }}
+      - name: Upload to release
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.whl
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
