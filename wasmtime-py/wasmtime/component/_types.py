@@ -5,7 +5,7 @@ from ._resource_type import ResourceType
 from dataclasses import dataclass
 import ctypes
 from ctypes import byref, POINTER
-from typing import Any, Optional, Dict, List, Union, Tuple, Set
+from typing import Any, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from wasmtime import Managed, Engine
 
 
@@ -696,6 +696,24 @@ class TupleType(Managed["ctypes._Pointer[ffi.wasmtime_component_tuple_type_t]"],
 class Variant:
     tag: str
     payload: Optional[Any] = None
+
+
+@dataclass(init=False, repr=False)
+class VariantCase(Variant):
+    """Base class for typed variant arms emitted by the bindgen."""
+
+    tag: ClassVar[str]  # type: ignore[misc]
+    __match_args__ = ("value",)
+
+    def __init__(self, value: Any = None) -> None:
+        super().__init__(tag=type(self).tag, payload=value)
+
+    @property
+    def value(self) -> Any:
+        return self.payload
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(value={self.payload!r})"
 
 
 case_test_cache: Set[type] = set()

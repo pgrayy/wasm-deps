@@ -60,14 +60,11 @@ from __future__ import annotations
 from typing import Any, Optional, Union
 
 from wasmtime.component import Variant as _WitVariant
+from wasmtime.component import VariantCase as _WitVariantCase
 
 
 def ok(value: Any = None) -> _WitVariant:
-    """Wrap ``value`` as the ``ok`` arm of a ``result<T, E>``.
-
-    Always tagged on the wire because both arms can carry payloads — pass the
-    bare ``value`` and this function lifts it into the right ``Variant``.
-    """
+    """Wrap ``value`` as the ``ok`` arm of a ``result<T, E>``."""
     return _WitVariant("ok", value)
 
 
@@ -116,13 +113,11 @@ def _type_annotation(ref: TypeRef, ir: Resolve) -> str:
     For named types, uses the public class name. For containers, recurses.
     """
     if ref.is_primitive:
-        assert ref.primitive is not None
         return _PRIMITIVE_ANNOTATIONS[ref.primitive]
     canonical = ref.canonical(ir)
     if canonical.is_primitive:
-        assert canonical.primitive is not None
         return _PRIMITIVE_ANNOTATIONS[canonical.primitive]
-    t = canonical.resolve(ir)
+    t = ir.types[canonical.type_id]
 
     if t.name is not None:
         return _pascal(t.name)
@@ -171,7 +166,7 @@ def _wrap_field_for_storage(ty: TypeRef, value_expr: str, ir: Resolve, ctx: _tag
     canonical = ty.canonical(ir)
     if canonical.is_primitive:
         return value_expr
-    target = canonical.resolve(ir)
+    target = ir.types[canonical.type_id]
     if isinstance(target.kind, Option) and _tagging.option_is_tagged(canonical, ctx):
         return f"(_WitVariant('none') if {value_expr} is None else _WitVariant('some', {value_expr}))"
     return value_expr
@@ -186,7 +181,7 @@ def _unwrap_field_for_read(ty: TypeRef, value_expr: str, ir: Resolve, ctx: _tagg
     canonical = ty.canonical(ir)
     if canonical.is_primitive:
         return value_expr
-    target = canonical.resolve(ir)
+    target = ir.types[canonical.type_id]
     if isinstance(target.kind, Option) and _tagging.option_is_tagged(canonical, ctx):
         return f"(None if {value_expr}.tag == 'none' else {value_expr}.payload)"
     return value_expr
@@ -315,52 +310,45 @@ def _format_docstring(text: str) -> str:
 # --- Variant emission --------------------------------------------------
 
 def _emit_variant(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx, out: io.StringIO) -> None:
-    """Emit a variant as a namespace of factory functions, one per arm.
-
-    Tagged variants:  ``MyVariant.arm(payload)`` returns ``Variant("arm", payload)``.
-    Untagged:        ``MyVariant.arm(payload)`` returns the bare payload, and
-                     ``MyVariant.unit_arm()`` returns ``None``.
-
-    Either way the user picks the arm by calling the right factory; the
-    returned value is what wasmtime-py expects on the wire.
-    """
+    """Emit a container class with one ``VariantCase`` arm subclass per case."""
     assert isinstance(t.kind, Variant)
     name = _type_name(t, ir)
     cases = t.kind.cases
     tagged = _tagging.variant_is_tagged(_ir.TypeRef(type_id=t.id), ctx)
+    docs = (t.docs or "").strip()
+
+    if not tagged:
+        arm_types = ["None" if c.ty is None else _type_annotation(c.ty, ir) for c in cases]
+        union = " | ".join(arm_types) if arm_types else "Any"
+        out.write(f"\n{name} = {union}\n")
+        if docs:
+            out.write(f'"""{_format_docstring(docs)}"""\n')
+        return
 
     out.write(f"\nclass {name}:\n")
-    docs = (t.docs or "").strip()
     if docs:
         out.write(f'    """{_format_docstring(docs)}"""\n')
-    note = (
-        "Tagged variant: each arm wraps in ``Variant(tag, payload)``."
-        if tagged
-        else "Untagged variant: each arm returns its bare payload (or ``None`` for unit arms)."
-    )
-    out.write(f"    # {note}\n\n")
+    out.write("    pass\n")
 
+    arm_pairs: list[tuple[str, str]] = []
     for case in cases:
-        ident = _ident(case.name)
-        if case.ty is None:
-            out.write(f"    @staticmethod\n")
-            out.write(f"    def {ident}() -> Any:\n")
-            if case.docs:
-                out.write(f'        """{_format_docstring(case.docs)}"""\n')
-            if tagged:
-                out.write(f"        return _WitVariant({case.name!r})\n\n")
-            else:
-                out.write(f"        return None\n\n")
-        else:
-            ann = _type_annotation(case.ty, ir)
-            out.write(f"    @staticmethod\n")
-            out.write(f"    def {ident}(value: {ann}) -> Any:\n")
-            if case.docs:
-                out.write(f'        """{_format_docstring(case.docs)}"""\n')
-            if tagged:
-                out.write(f"        return _WitVariant({case.name!r}, value)\n\n")
-            else:
-                out.write(f"        return value\n\n")
+        arm_name = f"{name}_{_pascal(case.name)}"
+        arm_pairs.append((case.name, arm_name))
+        out.write(f"\nclass {arm_name}({name}, _WitVariantCase):\n")
+        if case.docs:
+            out.write(f'    """{_format_docstring(case.docs)}"""\n')
+        out.write(f"    tag = {case.name!r}\n")
+
+    out.write(f"\n_{name}_CASES: dict[str, type] = {{\n")
+    for tag, cls in arm_pairs:
+        out.write(f"    {tag!r}: {cls},\n")
+    out.write("}\n")
+    out.write(f"\ndef _{_snake(name)}_lift(raw: _WitVariant) -> {name}:\n")
+    out.write(f"    cls = _{name}_CASES.get(raw.tag)\n")
+    out.write(f"    if cls is None:\n")
+    out.write(f"        raise ValueError(f'unknown {name} arm: {{raw.tag!r}}')\n")
+    out.write(f"    return cls(raw.payload)\n")
+    out.write(f"{name}.lift = staticmethod(_{_snake(name)}_lift)  # type: ignore[attr-defined]\n")
 
 
 # --- Flags / Tuples ----------------------------------------------------
@@ -493,7 +481,7 @@ def emit_module(ir: Resolve) -> str:
             target = t.kind.target.canonical(ir)
             if target.is_primitive:
                 continue
-            target_t = target.resolve(ir)
+            target_t = ir.types[target.type_id]
             if target_t.name is None or target_t.name == t.name:
                 continue
             out.write(f"\n{_type_name(t, ir)} = {_type_name(target_t, ir)}\n")
