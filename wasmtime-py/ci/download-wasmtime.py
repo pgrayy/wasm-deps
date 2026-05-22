@@ -12,7 +12,7 @@ from pathlib import Path
 
 # set to "dev" to download the latest or pick a tag from
 # https://github.com/pgrayy/wasm-deps/releases
-WASMTIME_VERSION = "v46.0.4"
+WASMTIME_VERSION = "v46.0.5"
 WASMTIME_REPO = "pgrayy/wasm-deps"
 
 
