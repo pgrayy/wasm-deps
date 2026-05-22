@@ -12,6 +12,10 @@ on:
         description: 'Test wasmtime-py'
         type: boolean
         default: true
+      run_token_generator:
+        description: 'Test aws-bedrock-token-generator-js'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -27,6 +31,7 @@ jobs:
     outputs:
       wasmtime: ${{ steps.filter.outputs.wasmtime }}
       wasmtime_py: ${{ steps.filter.outputs.wasmtime_py }}
+      token_generator: ${{ steps.filter.outputs.token_generator }}
     steps:
       - id: filter
         env:
@@ -49,6 +54,7 @@ jobs:
 
           check_path wasmtime wasmtime
           check_path wasmtime_py wasmtime-py
+          check_path token_generator aws-bedrock-token-generator-js
 
   lint-wasmtime:
     name: Lint wasmtime
@@ -146,3 +152,20 @@ jobs:
         run: uv run ci/download-wasmtime.py
       - name: Test
         run: uv run --all-extras pytest
+
+  test-token-generator:
+    name: Test aws-bedrock-token-generator-js
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.token_generator == 'true' || inputs.run_token_generator == true
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: aws-bedrock-token-generator-js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
