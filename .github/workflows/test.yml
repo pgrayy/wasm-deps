@@ -3,6 +3,15 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_wasmtime:
+        description: 'Test wasmtime'
+        type: boolean
+        default: true
+      run_wasmtime_py:
+        description: 'Test wasmtime-py'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -12,9 +21,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect-changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      wasmtime: ${{ steps.filter.outputs.wasmtime }}
+      wasmtime_py: ${{ steps.filter.outputs.wasmtime_py }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files --paginate --jq '.[].filename')
+          else
+            FILES=""
+          fi
+
+          check_path() {
+            local name="$1" path="$2"
+            if echo "$FILES" | grep -q "^${path}/"; then
+              echo "${name}=true" >> $GITHUB_OUTPUT
+            else
+              echo "${name}=false" >> $GITHUB_OUTPUT
+            fi
+          }
+
+          check_path wasmtime wasmtime
+          check_path wasmtime_py wasmtime-py
+
   lint-wasmtime:
-    name: Lint wasmtime (fmt + clippy)
-    runs-on: macos-latest
+    name: Lint wasmtime
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.wasmtime == 'true' || inputs.run_wasmtime == true
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -27,14 +67,19 @@ jobs:
         working-directory: wasmtime
 
   build-wasmtime:
-    name: Build wasmtime C API
+    name: Build wasmtime
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.wasmtime == 'true' || inputs.run_wasmtime == true
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
-      - name: Build C API
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wasmtime
+      - name: Build
         working-directory: wasmtime
         run: cargo build --release -p wasmtime-c-api
       - uses: actions/upload-artifact@v4
@@ -43,17 +88,19 @@ jobs:
           path: wasmtime/target/release/libwasmtime.dylib
 
   test-wasmtime:
-    name: Test wasmtime C API
-    needs: [build-wasmtime]
+    name: Test wasmtime
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.wasmtime == 'true' || inputs.run_wasmtime == true
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip1,wasm32-wasip2,wasm32-unknown-unknown
-      - name: Install Ninja
-        run: brew install ninja
-      - name: Build and run C API tests
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wasmtime
+      - name: Build and test
         working-directory: wasmtime
         run: |
           cmake -G Ninja -Sexamples -DCMAKE_BUILD_TYPE=Debug -Bexamples/build \
@@ -66,7 +113,15 @@ jobs:
 
   test-wasmtime-py:
     name: Test wasmtime-py
-    needs: [build-wasmtime]
+    needs: [detect-changes, build-wasmtime]
+    if: |
+      !failure() && !cancelled() &&
+      (
+        needs.detect-changes.outputs.wasmtime == 'true' ||
+        needs.detect-changes.outputs.wasmtime_py == 'true' ||
+        inputs.run_wasmtime == true ||
+        inputs.run_wasmtime_py == true
+      )
     runs-on: macos-latest
     defaults:
       run:
@@ -77,5 +132,17 @@ jobs:
         with:
           python-version: '3.x'
       - uses: astral-sh/setup-uv@v7
-      - run: uv run ci/download-wasmtime.py
-      - run: uv run --all-extras pytest
+      - name: Download artifact
+        if: needs.build-wasmtime.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: wasmtime-c-api
+          path: wasmtime-py/wasmtime/darwin-aarch64
+      - name: Rename artifact
+        if: needs.build-wasmtime.result == 'success'
+        run: mv wasmtime/darwin-aarch64/libwasmtime.dylib wasmtime/darwin-aarch64/_libwasmtime.dylib
+      - name: Download release
+        if: needs.build-wasmtime.result == 'skipped'
+        run: uv run ci/download-wasmtime.py
+      - name: Test
+        run: uv run --all-extras pytest
