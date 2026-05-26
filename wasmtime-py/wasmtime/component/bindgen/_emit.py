@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import io
 import textwrap
+from typing import Optional
 
 from . import _ir, _tagging
 from ._ir import (
@@ -105,6 +106,30 @@ def _type_name(t: Type, ir: Resolve) -> str:
     return _pascal(t.name)
 
 
+def _module_for_interface(iface: "_ir.Interface", ir: Resolve) -> str:
+    """Return the Python module name (no extension) for a WIT interface.
+
+    Mirrors jco's filename convention: ``<package-ns>-<package-name>-<iface>``,
+    snake-cased for Python. ``wasi:io@0.2.6/streams`` -> ``wasi_io_streams``.
+    Interfaces without an iface name (anonymous) or without a package fall back
+    to a synthesized name based on their id.
+    """
+    iface_name = iface.name or f"iface{iface.id}"
+    if iface.package is not None and iface.package < len(ir.packages):
+        pkg = ir.packages[iface.package].name  # "wasi:io@0.2.6"
+        ns_pkg = pkg.split("@", 1)[0]  # "wasi:io"
+        return f"{_snake(ns_pkg.replace(':', '_'))}_{_snake(iface_name)}"
+    return f"_iface_{_snake(iface_name)}"
+
+
+def _module_for_type(t: Type, ir: Resolve) -> Optional[str]:
+    """Module a named type lives in, or ``None`` if it's a world-level type."""
+    if t.owner_interface is None:
+        return None
+    iface = ir.interfaces[t.owner_interface]
+    return _module_for_interface(iface, ir)
+
+
 # --- Type expression ---------------------------------------------------
 
 def _type_annotation(ref: TypeRef, ir: Resolve) -> str:
@@ -126,7 +151,7 @@ def _type_annotation(ref: TypeRef, ir: Resolve) -> str:
     kind = t.kind
     if isinstance(kind, Option):
         inner = _type_annotation(kind.inner, ir)
-        return f"Optional[{inner}]"
+        return f"{inner} | None"
     if isinstance(kind, List):
         if kind.elem.is_primitive and kind.elem.primitive == "u8":
             return "bytes"
@@ -152,116 +177,27 @@ _PRIMITIVE_ANNOTATIONS: dict[str, str] = {
 }
 
 
-def _wrap_field_for_storage(ty: TypeRef, value_expr: str, ir: Resolve, ctx: _tagging.TaggingCtx) -> str:
-    """Return a Python expression that turns ``value_expr`` into the wire
-    shape wasmtime-py expects when stored on a record's kebab-case attribute.
-
-    Today the only adjustment is wrapping tagged options: an
-    ``option<tagged-variant>`` (or anything whose inner contributes
-    ``object`` to the case set) needs ``Variant('none' | 'some', payload)``
-    on the wire. Untagged options pass ``None | payload`` through.
-    """
-    if ty.is_primitive:
-        return value_expr
-    canonical = ty.canonical(ir)
-    if canonical.is_primitive:
-        return value_expr
-    target = ir.types[canonical.type_id]
-    if isinstance(target.kind, Option) and _tagging.option_is_tagged(canonical, ctx):
-        return f"(_WitVariant('none') if {value_expr} is None else _WitVariant('some', {value_expr}))"
-    return value_expr
-
-
-def _unwrap_field_for_read(ty: TypeRef, value_expr: str, ir: Resolve, ctx: _tagging.TaggingCtx) -> str:
-    """Inverse of :func:`_wrap_field_for_storage` — if the field stores a
-    wrapped option, return the bare ``None | payload`` form for snake-case
-    accessor reads."""
-    if ty.is_primitive:
-        return value_expr
-    canonical = ty.canonical(ir)
-    if canonical.is_primitive:
-        return value_expr
-    target = ir.types[canonical.type_id]
-    if isinstance(target.kind, Option) and _tagging.option_is_tagged(canonical, ctx):
-        return f"(None if {value_expr}.tag == 'none' else {value_expr}.payload)"
-    return value_expr
-
-
 # --- Record emission ---------------------------------------------------
 
 def _emit_record(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx, out: io.StringIO) -> None:
-    """Emit a record class with kebab-case attribute storage.
+    """Emit a record as a ``@dataclass`` with snake_case fields.
 
-    The Python __init__ takes snake_case keyword args (so users call
-    ``Foo(my_field=...)``); the underlying __dict__ uses kebab-case keys so
-    wasmtime-py reads the right attribute via ``getattr(obj, "my-field")``.
+    Wire field names are kebab-case; wasmtime-py's RecordType._lower/_lift
+    translates kebab<->snake at the FFI boundary.
     """
     assert isinstance(t.kind, Record)
     name = _type_name(t, ir)
     fields = t.kind.fields
 
-    out.write(f"\nclass {name}:\n")
+    out.write(f"\n@dataclass(kw_only=True)\nclass {name}:\n")
     if t.docs:
         out.write(f'    """{_format_docstring(t.docs)}"""\n')
-
-    # No __slots__: Python identifier rules ban hyphens, and the kebab-case
-    # attribute storage is what wasmtime-py reads via ``getattr(obj, "kebab-name")``.
-    # The regular ``__dict__`` accepts any string key.
-
-    # __init__ — snake_case args, kebab-case storage.
     if not fields:
-        out.write("    def __init__(self) -> None:\n")
-        out.write("        pass\n")
-    else:
-        out.write("    def __init__(\n")
-        out.write("        self,\n")
-        out.write("        *,\n")
-        for f in fields:
-            ann = _type_annotation(f.ty, ir)
-            out.write(f"        {_ident(f.name)}: {ann},\n")
-        out.write("    ) -> None:\n")
-        for f in fields:
-            # Store under the kebab-case name so wasmtime-py reads the right
-            # attribute via ``getattr(obj, "kebab-name")``. If the field is a
-            # tagged option, wrap on storage so wasmtime-py sees the right
-            # ``Variant('none' | 'some', ...)`` shape.
-            stored = _wrap_field_for_storage(f.ty, _ident(f.name), ir, ctx)
-            out.write(f"        setattr(self, {f.name!r}, {stored})\n")
-
-    out.write("\n")
-    # Snake-case property accessors so Python users don't have to use
-    # getattr (and so tagged-option fields read back as ``None | payload``,
-    # not as the wrapped ``Variant`` form stored under the kebab attr).
+        out.write("    pass\n\n")
+        return
     for f in fields:
-        snake = _ident(f.name)
-        unwrapped = _unwrap_field_for_read(f.ty, f"getattr(self, {f.name!r})", ir, ctx)
-        if snake == f.name and unwrapped == f"getattr(self, {f.name!r})":
-            continue  # plain attr access already works
-        out.write(f"    @property\n")
-        out.write(f"    def {snake}(self) -> {_type_annotation(f.ty, ir)}:\n")
-        out.write(f"        return {unwrapped}\n\n")
-
-    # __repr__ for ergonomics + __eq__ so round-trip tests can compare.
-    out.write("    def __repr__(self) -> str:\n")
-    if fields:
-        parts = ", ".join(f"{_ident(f.name)}={{getattr(self, {f.name!r})!r}}" for f in fields)
-        out.write(f"        return f'{name}({parts})'\n\n")
-    else:
-        out.write(f"        return '{name}()'\n\n")
-
-    out.write("    def __eq__(self, other: object) -> bool:\n")
-    out.write(f"        if not isinstance(other, {name}):\n")
-    out.write("            return NotImplemented\n")
-    if not fields:
-        out.write("        return True\n")
-    else:
-        checks = " and ".join(
-            f"getattr(self, {f.name!r}) == getattr(other, {f.name!r})" for f in fields
-        )
-        out.write(f"        return {checks}\n")
-
-    out.write("\n    def __hash__(self) -> int:\n")
-    out.write("        return id(self)\n")
+        ann = _type_annotation(f.ty, ir)
+        out.write(f"    {_ident(f.name)}: {ann}\n")
     out.write("\n")
 
 
@@ -287,7 +223,7 @@ def _emit_enum(t: Type, ir: Resolve, out: io.StringIO) -> None:
         const = case.upper().replace("-", "_")
         if const in _PY_KEYWORDS:
             const += "_"
-        out.write(f"    {const}: '{name}'\n")
+        out.write(f"    {const}: {name}\n")
     out.write("\n")
 
     # Materialize the constants after the class body using __new__ on str.
@@ -328,7 +264,12 @@ def _emit_variant(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx, out: io.String
     out.write(f"\nclass {name}:\n")
     if docs:
         out.write(f'    """{_format_docstring(docs)}"""\n')
-    out.write("    pass\n")
+    out.write(f"    @staticmethod\n")
+    out.write(f"    def lift(raw: _WitVariant) -> {name}:\n")
+    out.write(f"        cls = _{name}_CASES.get(raw.tag)\n")
+    out.write(f"        if cls is None:\n")
+    out.write(f"            raise ValueError(f'unknown {name} arm: {{raw.tag!r}}')\n")
+    out.write(f"        return cls(raw.payload)\n")
 
     arm_pairs: list[tuple[str, str]] = []
     for case in cases:
@@ -343,12 +284,6 @@ def _emit_variant(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx, out: io.String
     for tag, cls in arm_pairs:
         out.write(f"    {tag!r}: {cls},\n")
     out.write("}\n")
-    out.write(f"\ndef _{_snake(name)}_lift(raw: _WitVariant) -> {name}:\n")
-    out.write(f"    cls = _{name}_CASES.get(raw.tag)\n")
-    out.write(f"    if cls is None:\n")
-    out.write(f"        raise ValueError(f'unknown {name} arm: {{raw.tag!r}}')\n")
-    out.write(f"    return cls(raw.payload)\n")
-    out.write(f"{name}.lift = staticmethod(_{_snake(name)}_lift)  # type: ignore[attr-defined]\n")
 
 
 # --- Flags / Tuples ----------------------------------------------------
@@ -426,7 +361,7 @@ def _emit_resource(t: Type, ir: Resolve, out: io.StringIO) -> None:
         if fn.kind == "constructor":
             sig_args = ", ".join(param_strs)
             out.write(f"    @staticmethod\n")
-            out.write(f"    def new({sig_args}, *, invoke: Any) -> '{name}':\n")
+            out.write(f"    def new({sig_args}, *, invoke: Any) -> {name}:\n")
             arg_pass = ", ".join(_ident(p_name) for p_name, _ in params)
             out.write(
                 f"        return {name}(invoke('[constructor]{t.name}', ({arg_pass},)), invoke)\n\n"
@@ -450,43 +385,258 @@ def _emit_resource(t: Type, ir: Resolve, out: io.StringIO) -> None:
 
 # --- Module-level driver ----------------------------------------------
 
+_MODULE_HEADER = '''\
+"""Auto-generated by bindgen. Do not edit."""
+# ruff: noqa: E501, F401, I001
+# fmt: off
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Optional, Union
+
+from wasmtime.component import Variant as _WitVariant
+from wasmtime.component import VariantCase as _WitVariantCase
+'''
+
+
+def _exported_names(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx) -> "list[str]":
+    """Return the top-level Python names a type emits in its module body."""
+    if t.name is None:
+        return []
+    name = _type_name(t, ir)
+    if isinstance(t.kind, Variant):
+        tagged = _tagging.variant_is_tagged(_ir.TypeRef(type_id=t.id), ctx)
+        if not tagged:
+            return [name]
+        return [name] + [f"{name}_{_pascal(c.name)}" for c in t.kind.cases]
+    if isinstance(t.kind, Alias):
+        target = t.kind.target.canonical(ir)
+        if target.is_primitive:
+            return [name]
+        target_t = ir.types[target.type_id]
+        if target_t.name is None or target_t.name == t.name:
+            return []  # nothing emitted in this module's body
+        return [name]
+    return [name]
+
+
+def _types_referenced(t: Type, ir: Resolve) -> "set[int]":
+    """Collect IDs of named types this type references via its kind."""
+    seen: set[int] = set()
+
+    def visit_ref(ref: TypeRef) -> None:
+        if ref.is_primitive:
+            return
+        canonical = ref.canonical(ir)
+        if canonical.is_primitive:
+            return
+        target = ir.types[canonical.type_id]
+        if target.name is not None:
+            seen.add(target.id)
+            return
+        # Anonymous container — recurse into its inner refs.
+        kind = target.kind
+        if isinstance(kind, Option):
+            visit_ref(kind.inner)
+        elif isinstance(kind, List):
+            visit_ref(kind.elem)
+        elif isinstance(kind, Tuple):
+            for r in kind.types:
+                visit_ref(r)
+        elif isinstance(kind, Result):
+            if kind.ok is not None:
+                visit_ref(kind.ok)
+            if kind.err is not None:
+                visit_ref(kind.err)
+
+    kind = t.kind
+    if isinstance(kind, Record):
+        for f in kind.fields:
+            visit_ref(f.ty)
+    elif isinstance(kind, Variant):
+        for case in kind.cases:
+            if case.ty is not None:
+                visit_ref(case.ty)
+    elif isinstance(kind, Alias):
+        visit_ref(kind.target)
+    elif isinstance(kind, Resource):
+        # Resource methods are emitted inline; their param/return refs are
+        # discovered via interface scanning in _emit_resource.
+        pass
+    return seen
+
+
 def emit_module(ir: Resolve) -> str:
-    """Render the full Python module for the given WIT IR.
+    """Compatibility shim: emit everything into a single Python source string."""
+    files = emit_package(ir)
+    # Concatenate all module bodies; only useful when all types are world-level.
+    return "\n\n".join(files.values())
 
-    Output is deterministic — types are emitted in IR (i.e. type-id) order so
-    the same input always produces byte-identical output.
+
+def emit_package(ir: Resolve) -> "dict[str, str]":
+    """Emit one Python module per WIT interface plus a top-level ``__init__``.
+
+    Returns a dict ``{module_name: source}``. ``module_name`` is the bare
+    Python module name (e.g. ``strands_agent_streaming``); ``"__init__"`` is
+    the package init that re-exports world-level types and common cross-cutting
+    interface types.
     """
-    out = io.StringIO()
-    out.write(HEADER)
-    out.write("\n")
-
     ctx = _tagging.TaggingCtx.new(ir)
 
+    # Group named types by module.
+    modules: dict[str, list[Type]] = {}
+    world_types: list[Type] = []
     for t in ir.types:
         if t.name is None:
-            continue  # anonymous container types are emitted inline by _type_annotation
-        if isinstance(t.kind, Record):
-            _emit_record(t, ir, ctx, out)
-        elif isinstance(t.kind, Enum):
-            _emit_enum(t, ir, out)
-        elif isinstance(t.kind, Variant):
-            _emit_variant(t, ir, ctx, out)
-        elif isinstance(t.kind, Flags):
-            _emit_flags(t, ir, out)
-        elif isinstance(t.kind, Resource):
-            _emit_resource(t, ir, out)
-        elif isinstance(t.kind, Alias):
-            # `use other.{this-name}` — emit a Python alias unless the target
-            # already shares this name (in which case it's already bound).
-            target = t.kind.target.canonical(ir)
-            if target.is_primitive:
+            continue
+        mod = _module_for_type(t, ir)
+        if mod is None:
+            world_types.append(t)
+        else:
+            modules.setdefault(mod, []).append(t)
+
+    # For each module, emit the type bodies + an import header for cross-module refs.
+    out_files: dict[str, str] = {}
+    for mod_name, mod_types in modules.items():
+        body = io.StringIO()
+        for t in mod_types:
+            _emit_type(t, ir, ctx, body)
+
+        # Resolve cross-module references.
+        cross: dict[str, set[str]] = {}  # module -> set of type names
+        for t in mod_types:
+            for ref_id in _types_referenced(t, ir):
+                ref_t = ir.types[ref_id]
+                ref_mod = _module_for_type(ref_t, ir)
+                if ref_mod is None or ref_mod == mod_name:
+                    continue
+                cross.setdefault(ref_mod, set()).add(_type_name(ref_t, ir))
+
+        header = io.StringIO()
+        header.write(_MODULE_HEADER)
+        if cross:
+            header.write("\n")
+            for other_mod in sorted(cross):
+                names = ", ".join(sorted(cross[other_mod]))
+                header.write(f"from .{other_mod} import {names}\n")
+
+        # Two blank lines between the import block and the first declaration;
+        # exactly one trailing newline at EOF.
+        body_str = body.getvalue().rstrip()
+        sep = "\n\n" if body_str else ""
+        out_files[mod_name] = header.getvalue().rstrip() + sep + body_str + "\n"
+
+    # __init__: re-export every named type defined in an interface module as
+    # a flat namespace. Skip same-name aliases (the canonical module owns the
+    # symbol) -- two-pass so non-aliases populate `seen_names` first.
+    init = io.StringIO()
+    init.write('"""Auto-generated by bindgen. Do not edit."""\n')
+    init.write("# ruff: noqa: E501, F401, I001\n")
+    init.write("# fmt: off\n\n")
+    init.write("from __future__ import annotations\n\n")
+    init.write("from typing import Any\n\n")
+    init.write("from wasmtime.component import Variant as _WitVariant\n")
+    seen_names: set[str] = set()
+    per_module_exports: dict[str, list[str]] = {m: [] for m in modules}
+
+    def _is_self_alias(t: Type) -> bool:
+        """True when ``t`` is an alias whose direct (or canonical) target is a
+        named type with the same name in a different module."""
+        if not isinstance(t.kind, Alias):
+            return False
+        ref = t.kind.target
+        if not ref.is_primitive:
+            direct_t = ir.types[ref.type_id]
+            if direct_t.name == t.name:
+                return True
+        canonical = ref.canonical(ir)
+        if canonical.is_primitive:
+            return False
+        target_t = ir.types[canonical.type_id]
+        return target_t.name == t.name
+
+    # Pass 1: claim all non-alias names. Variants contribute container + arms.
+    for mod_name in sorted(modules):
+        for t in modules[mod_name]:
+            if _is_self_alias(t):
                 continue
-            target_t = ir.types[target.type_id]
-            if target_t.name is None or target_t.name == t.name:
+            for n in _exported_names(t, ir, ctx):
+                if n in seen_names:
+                    continue
+                seen_names.add(n)
+                per_module_exports[mod_name].append(n)
+    # Pass 2: re-export self-aliases only when their target's canonical module
+    # didn't already export the name (shouldn't happen, but defensive).
+    for mod_name in sorted(modules):
+        for t in modules[mod_name]:
+            if not _is_self_alias(t):
                 continue
-            out.write(f"\n{_type_name(t, ir)} = {_type_name(target_t, ir)}\n")
+            for n in _exported_names(t, ir, ctx):
+                if n in seen_names:
+                    continue
+                seen_names.add(n)
+                per_module_exports[mod_name].append(n)
 
-    return out.getvalue()
+    init.write("\n")
+    all_exports: list[str] = []
+    for mod_name in sorted(per_module_exports):
+        names = sorted(per_module_exports[mod_name])
+        if names:
+            init.write(f"from .{mod_name} import {', '.join(names)}\n")
+            all_exports.extend(names)
+
+    if world_types:
+        init.write("\n# World-level types.\n")
+        body = io.StringIO()
+        for t in world_types:
+            _emit_type(t, ir, ctx, body)
+        init.write(body.getvalue())
+
+    init.write("\n\ndef ok(value: Any = None) -> _WitVariant:\n")
+    init.write('    """Wrap ``value`` as the ``ok`` arm of a ``result<T, E>``."""\n')
+    init.write("    return _WitVariant(\"ok\", value)\n\n\n")
+    init.write("def err(value: Any = None) -> _WitVariant:\n")
+    init.write('    """Wrap ``value`` as the ``err`` arm of a ``result<T, E>``."""\n')
+    init.write("    return _WitVariant(\"err\", value)\n")
+
+    all_exports.extend([_type_name(t, ir) for t in world_types if t.name])
+    all_exports.extend(["ok", "err"])
+    init.write("\n\n__all__ = [\n")
+    for n in sorted(set(all_exports)):
+        init.write(f"    {n!r},\n")
+    init.write("]\n")
+
+    out_files["__init__"] = init.getvalue().rstrip() + "\n"
+    return out_files
 
 
-__all__ = ["emit_module"]
+def _emit_type(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx, out: io.StringIO) -> None:
+    """Dispatch a single named type to the right emitter."""
+    if isinstance(t.kind, Record):
+        _emit_record(t, ir, ctx, out)
+    elif isinstance(t.kind, Enum):
+        _emit_enum(t, ir, out)
+    elif isinstance(t.kind, Variant):
+        _emit_variant(t, ir, ctx, out)
+    elif isinstance(t.kind, Flags):
+        _emit_flags(t, ir, out)
+    elif isinstance(t.kind, Resource):
+        _emit_resource(t, ir, out)
+    elif isinstance(t.kind, Alias):
+        target = t.kind.target.canonical(ir)
+        if target.is_primitive:
+            assert target.primitive is not None
+            out.write(f"\n{_type_name(t, ir)} = {_PRIMITIVE_ANNOTATIONS[target.primitive]}\n")
+            return
+        target_t = ir.types[target.type_id]
+        if target_t.name is None:
+            return
+        if target_t.name == t.name:
+            # Same name in both modules -- a cross-module re-import handled
+            # by the module-level import header. No body emission needed.
+            return
+        out.write(f"\n{_type_name(t, ir)} = {_type_name(target_t, ir)}\n")
+
+
+__all__ = ["emit_module", "emit_package"]

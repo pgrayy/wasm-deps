@@ -1,13 +1,13 @@
 """CLI entry point for the WIT host bindgen.
 
 Usage:
-    python -m wasmtime.component.bindgen <wit-path> [-o <out.py>]
+    python -m wasmtime.component.bindgen <wit-path> -o <out-dir>
 
 Drives ``wasm-tools component wit --json``, parses the result into the typed
-IR, and emits a Python module that wasmtime-py accepts at the FFI boundary
-without an additional marshaling layer.
+IR, and emits a Python *package* (one module per WIT interface plus an
+``__init__.py`` that re-exports world-level types).
 
-If ``-o`` is omitted, the generated module is written to stdout.
+``-o`` is the output directory; it will be created if missing.
 """
 
 from __future__ import annotations
@@ -17,12 +17,11 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 from . import _emit, _ir
 
 
-def _dump_wit_ir(wit_path: Path) -> Any:
+def _dump_wit_ir(wit_path: Path) -> dict:
     result = subprocess.run(
         ["wasm-tools", "component", "wit", "--json", str(wit_path)],
         check=True,
@@ -39,8 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("wit_path", type=Path, help="Path to a WIT directory or file.")
     parser.add_argument(
-        "-o", "--output", type=Path, default=None,
-        help="Write the generated module to this path. Default: stdout.",
+        "-o", "--output", type=Path, required=True,
+        help="Output directory for the generated package.",
     )
     args = parser.parse_args(argv)
 
@@ -58,13 +57,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     ir = _ir.load(ir_json)
-    src = _emit.emit_module(ir)
+    files = _emit.emit_package(ir)
 
-    if args.output is None:
-        sys.stdout.write(src)
-    else:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(src)
+    out_dir: Path = args.output
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Remove any previously-generated .py so deletions in the WIT propagate.
+    for stale in out_dir.glob("*.py"):
+        stale.unlink()
+    for mod_name, content in files.items():
+        (out_dir / f"{mod_name}.py").write_text(content)
 
     return 0
 

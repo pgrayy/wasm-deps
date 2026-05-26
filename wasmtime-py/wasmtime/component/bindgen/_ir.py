@@ -188,10 +188,17 @@ class WorldItem:
 
 
 @dataclass
+class Package:
+    id: int
+    name: str  # e.g. "wasi:io@0.2.6" or "strands:agent@0.1.0"
+
+
+@dataclass
 class Resolve:
     types: list[Type]
     interfaces: list[Interface]
     worlds: list[World]
+    packages: list[Package] = field(default_factory=list)
 
 
 # --- Loader ------------------------------------------------------------
@@ -327,7 +334,12 @@ def load(json_blob: dict) -> Resolve:
             )
         )
 
-    return Resolve(types=types, interfaces=interfaces, worlds=worlds)
+    packages = [
+        Package(id=idx, name=raw["name"])
+        for idx, raw in enumerate(json_blob.get("packages") or [])
+    ]
+
+    return Resolve(types=types, interfaces=interfaces, worlds=worlds, packages=packages)
 
 
 __all__ = [
@@ -340,6 +352,7 @@ __all__ = [
     "Handle",
     "Interface",
     "List",
+    "Package",
     "Option",
     "Record",
     "Resolve",

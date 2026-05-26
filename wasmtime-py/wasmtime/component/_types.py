@@ -576,7 +576,9 @@ class RecordType(Managed["ctypes._Pointer[ffi.wasmtime_component_record_type_t]"
         cleanup = True
         try:
             for name, ty in fields:
-                ty.convert_to_c(store, getattr(val, name), ctypes.pointer(raw.data[i].val))
+                # Wire field names are kebab-case; Python attrs are snake_case.
+                py_name = name.replace('-', '_')
+                ty.convert_to_c(store, getattr(val, py_name), ctypes.pointer(raw.data[i].val))
                 raw.data[i].name = ffi.str_to_capi(name)
                 i += 1
             ptr.contents.kind = ffi.WASMTIME_COMPONENT_RECORD
@@ -600,7 +602,8 @@ class RecordType(Managed["ctypes._Pointer[ffi.wasmtime_component_record_type_t]"
                 raw_name = ffi.to_str(raw_field.name)
                 assert(raw_name == name)
                 val = ty.convert_from_c(raw_field.val)
-                setattr(ret, name, val)
+                # Store under snake_case so user code can use dot access.
+                setattr(ret, name.replace('-', '_'), val)
                 raw_field.val.kind = ffi.WASMTIME_COMPONENT_BOOL
                 raw_field.val.of.boolean = False
             return ret
@@ -950,6 +953,27 @@ class OptionType(Managed["ctypes._Pointer[ffi.wasmtime_component_option_type_t]"
     def _cases(self) -> List[Tuple[str, Optional['ValType']]]:
         return [('none', None), ('some', self.payload)]
 
+    def _lower(self, store: Storelike, val: Any) -> Tuple[str, Optional['ctypes._Pointer[ffi.wasmtime_component_val_t]']]:
+        # Options always accept the bare value: None or the inner payload.
+        # The wire is two-arm Variant("none"|"some"); we wrap here so user
+        # code never needs to construct it.
+        if val is None:
+            return ('none', None)
+        ty = self.payload
+        raw = ffi.wasmtime_component_val_t()
+        ty.convert_to_c(store, val, ctypes.pointer(raw))
+        return ('some', ffi.wasmtime_component_val_new(byref(raw)))
+
+    def _lift(self, tag: str, ptr: Optional['ctypes._Pointer[ffi.wasmtime_component_val_t]']) -> Any:
+        # Lift to bare None | payload, no Variant wrapper.
+        if tag == 'none' or ptr is None:
+            return None
+        payload = self.payload.convert_from_c(ptr.contents)
+        ptr.contents.kind = ffi.WASMTIME_COMPONENT_BOOL
+        ptr.contents.of.boolean = False
+        ffi.wasmtime_component_val_delete(ptr)
+        return payload
+
     def convert_to_c(self, store: Storelike, val: Any, ptr: 'ctypes._Pointer[ffi.wasmtime_component_val_t]') -> None:
         _, raw = self._lower(store, val)
         ptr.contents.kind = ffi.WASMTIME_COMPONENT_OPTION
@@ -957,11 +981,7 @@ class OptionType(Managed["ctypes._Pointer[ffi.wasmtime_component_option_type_t]"
 
     def convert_from_c(self, c: 'ffi.wasmtime_component_val_t') -> Any:
         assert(c.kind == ffi.WASMTIME_COMPONENT_OPTION.value)
-        if c.of.option:
-            tag = 'some'
-        else:
-            tag = 'none'
-        return self._lift(tag, c.of.option)
+        return self._lift('some' if c.of.option else 'none', c.of.option)
 
 
 
