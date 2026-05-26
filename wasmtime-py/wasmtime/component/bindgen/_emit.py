@@ -80,7 +80,10 @@ def _snake(s: str) -> str:
 
 
 def _pascal(s: str) -> str:
-    return "".join(p[:1].upper() + p[1:] for p in s.split("-"))
+    name = "".join(p[:1].upper() + p[1:] for p in s.split("-"))
+    if name in _PY_KEYWORDS:
+        name += "_"
+    return name
 
 
 _PY_KEYWORDS = {
@@ -107,19 +110,39 @@ def _type_name(t: Type, ir: Resolve) -> str:
 
 
 def _module_for_interface(iface: "_ir.Interface", ir: Resolve) -> str:
-    """Return the Python module name (no extension) for a WIT interface.
+    """Dotted Python module path for a WIT interface, mirroring its WIT
+    hierarchy: ``strands:agent/streaming`` -> ``strands_agent.streaming``.
 
-    Mirrors jco's filename convention: ``<package-ns>-<package-name>-<iface>``,
-    snake-cased for Python. ``wasi:io@0.2.6/streams`` -> ``wasi_io_streams``.
-    Interfaces without an iface name (anonymous) or without a package fall back
-    to a synthesized name based on their id.
+    Bindgen's CLI driver turns each dot into a directory boundary, so the
+    output tree mirrors the WIT package/interface structure. Interfaces
+    without a package fall back to a synthesized name under ``_iface``.
     """
     iface_name = iface.name or f"iface{iface.id}"
     if iface.package is not None and iface.package < len(ir.packages):
         pkg = ir.packages[iface.package].name  # "wasi:io@0.2.6"
         ns_pkg = pkg.split("@", 1)[0]  # "wasi:io"
-        return f"{_snake(ns_pkg.replace(':', '_'))}_{_snake(iface_name)}"
-    return f"_iface_{_snake(iface_name)}"
+        pkg_part = _snake(ns_pkg.replace(":", "_"))
+        return f"{pkg_part}.{_snake(iface_name)}"
+    return f"_iface.{_snake(iface_name)}"
+
+
+def _relative_import(self_parts: "list[str]", other_mod: str) -> str:
+    """Build a Python relative import path from one module to another.
+
+    ``self_parts`` is the importing module split on ``.``; ``other_mod`` is
+    the target's dotted path. Returns e.g. ``.conversation`` for siblings or
+    ``..wasi_io.streams`` for cousins.
+    """
+    other_parts = other_mod.split(".")
+    common = 0
+    while (
+        common < len(self_parts) - 1
+        and common < len(other_parts)
+        and self_parts[common] == other_parts[common]
+    ):
+        common += 1
+    up = len(self_parts) - 1 - common
+    return "." * (up + 1) + ".".join(other_parts[common:])
 
 
 def _module_for_type(t: Type, ir: Resolve) -> Optional[str]:
@@ -246,7 +269,13 @@ def _format_docstring(text: str) -> str:
 # --- Variant emission --------------------------------------------------
 
 def _emit_variant(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx, out: io.StringIO) -> None:
-    """Emit a container class with one ``VariantCase`` arm subclass per case."""
+    """Emit a container class with one ``VariantCase`` arm subclass per case.
+
+    Tagged variants get a Python container with nested arm classes:
+    ``Container.Arm`` is the canonical access path; ``isinstance(x, Container.Arm)``
+    and ``case Container.Arm(value=v)`` both work natively. Untagged variants
+    collapse to a Python type alias union.
+    """
     assert isinstance(t.kind, Variant)
     name = _type_name(t, ir)
     cases = t.kind.cases
@@ -264,26 +293,26 @@ def _emit_variant(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx, out: io.String
     out.write(f"\nclass {name}:\n")
     if docs:
         out.write(f'    """{_format_docstring(docs)}"""\n')
-    out.write(f"    @staticmethod\n")
+
+    arm_names: list[tuple[str, str]] = []
+    for case in cases:
+        arm_name = _pascal(case.name)
+        arm_names.append((case.name, arm_name))
+        out.write(f"\n    class {arm_name}(_WitVariantCase):\n")
+        if case.docs:
+            out.write(f'        """{_format_docstring(case.docs)}"""\n')
+        out.write(f"        tag = {case.name!r}\n")
+
+    out.write(f"\n    _CASES: dict[str, type] = {{\n")
+    for tag, arm in arm_names:
+        out.write(f"        {tag!r}: {arm},\n")
+    out.write("    }\n")
+    out.write(f"\n    @staticmethod\n")
     out.write(f"    def lift(raw: _WitVariant) -> {name}:\n")
-    out.write(f"        cls = _{name}_CASES.get(raw.tag)\n")
+    out.write(f"        cls = {name}._CASES.get(raw.tag)\n")
     out.write(f"        if cls is None:\n")
     out.write(f"            raise ValueError(f'unknown {name} arm: {{raw.tag!r}}')\n")
     out.write(f"        return cls(raw.payload)\n")
-
-    arm_pairs: list[tuple[str, str]] = []
-    for case in cases:
-        arm_name = f"{name}_{_pascal(case.name)}"
-        arm_pairs.append((case.name, arm_name))
-        out.write(f"\nclass {arm_name}({name}, _WitVariantCase):\n")
-        if case.docs:
-            out.write(f'    """{_format_docstring(case.docs)}"""\n')
-        out.write(f"    tag = {case.name!r}\n")
-
-    out.write(f"\n_{name}_CASES: dict[str, type] = {{\n")
-    for tag, cls in arm_pairs:
-        out.write(f"    {tag!r}: {cls},\n")
-    out.write("}\n")
 
 
 # --- Flags / Tuples ----------------------------------------------------
@@ -401,15 +430,16 @@ from wasmtime.component import VariantCase as _WitVariantCase
 
 
 def _exported_names(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx) -> "list[str]":
-    """Return the top-level Python names a type emits in its module body."""
+    """Return the top-level Python names a type emits in its module body.
+
+    Variant arms are nested inside the container class, so only the container
+    name is module-level.
+    """
     if t.name is None:
         return []
     name = _type_name(t, ir)
     if isinstance(t.kind, Variant):
-        tagged = _tagging.variant_is_tagged(_ir.TypeRef(type_id=t.id), ctx)
-        if not tagged:
-            return [name]
-        return [name] + [f"{name}_{_pascal(c.name)}" for c in t.kind.cases]
+        return [name]
     if isinstance(t.kind, Alias):
         target = t.kind.target.canonical(ir)
         if target.is_primitive:
@@ -517,9 +547,10 @@ def emit_package(ir: Resolve) -> "dict[str, str]":
         header.write(_MODULE_HEADER)
         if cross:
             header.write("\n")
+            self_parts = mod_name.split(".")
             for other_mod in sorted(cross):
                 names = ", ".join(sorted(cross[other_mod]))
-                header.write(f"from .{other_mod} import {names}\n")
+                header.write(f"from {_relative_import(self_parts, other_mod)} import {names}\n")
 
         # Two blank lines between the import block and the first declaration;
         # exactly one trailing newline at EOF.
