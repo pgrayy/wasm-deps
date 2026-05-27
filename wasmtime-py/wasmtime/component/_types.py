@@ -960,6 +960,10 @@ class OptionType(Managed["ctypes._Pointer[ffi.wasmtime_component_option_type_t]"
         if val is None:
             return ('none', None)
         ty = self.payload
+        case_test_cache.clear()
+        ty.add_classes(case_test_cache)
+        if not isinstance(val, tuple(case_test_cache)):
+            raise ValueError('value not valid for this option type')
         raw = ffi.wasmtime_component_val_t()
         ty.convert_to_c(store, val, ctypes.pointer(raw))
         return ('some', ffi.wasmtime_component_val_new(byref(raw)))
