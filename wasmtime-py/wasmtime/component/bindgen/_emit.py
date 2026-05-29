@@ -320,7 +320,7 @@ def _emit_variant(t: Type, ir: Resolve, ctx: _tagging.TaggingCtx, out: io.String
     if docs:
         out.write(f'        """{_format_docstring(docs)}"""\n')
     for tag, arm in arm_names:
-        out.write(f"        {arm} = _{name}_{arm}\n")
+        out.write(f"        {arm}: ClassVar[type[_{name}_{arm}]]\n")
     out.write(f"        _CASES: ClassVar[dict[str, type]]\n")
     out.write(f"        @staticmethod\n")
     out.write(f"        def lift(raw: _WitVariant) -> {name}: ...\n")
